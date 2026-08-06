@@ -1,6 +1,5 @@
 """Unit tests for shared packages — ekoa_utils, ekoa_config, ekoa_types."""
 
-import os
 import pytest
 from datetime import datetime, timezone
 from pydantic import ValidationError
@@ -107,7 +106,7 @@ class TestHashingUtils:
         assert verify_password(pwd, hashed) is True
 
     def test_password_beyond_max_length(self):
-        from ekoa_utils.hashing import hash_password, verify_password
+        from ekoa_utils.hashing import hash_password
         pwd = "a" * 100
         with pytest.raises(ValueError, match="cannot be longer than 72"):
             hash_password(pwd)

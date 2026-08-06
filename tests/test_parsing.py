@@ -2,7 +2,6 @@
 
 import os
 import tempfile
-import pytest
 from apps.worker.parsers import parse_txt, parse_md, parse_file, parse_docx
 from apps.worker.chunking import chunk_text
 

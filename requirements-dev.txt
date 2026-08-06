@@ -1,0 +1,36 @@
+# EKOA development & CI dependencies (lint + test).
+# Shared packages (ekoa_config, ekoa_types, ekoa_utils) are installed from
+# source in CI and in the Docker images, not from this file.
+
+# ── Test / lint tooling ───────────────────────────────────────────────────────
+pytest
+pytest-asyncio
+httpx
+ruff
+
+# ── API service (apps/api) ────────────────────────────────────────────────────
+fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+aiosqlite
+alembic
+pydantic
+pydantic-settings
+python-jose[cryptography]
+bcrypt
+python-multipart
+
+# ── AI service (apps/ai) ──────────────────────────────────────────────────────
+langgraph
+sse-starlette
+
+# ── Worker service (apps/worker) ──────────────────────────────────────────────
+celery[redis]
+redis
+pymupdf
+python-docx
+tiktoken
+langchain-text-splitters
+qdrant-client
+sentence-transformers

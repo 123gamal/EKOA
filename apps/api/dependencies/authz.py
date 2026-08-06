@@ -12,7 +12,6 @@ from apps.api.dependencies.auth import get_current_user
 from apps.api.models.user import User
 from apps.api.models.org_member import OrgMember
 from apps.api.models.workspace import Workspace
-from apps.api.models.organization import Organization
 from apps.api.models.document import Document
 
 # Sentinel used so these helpers can be composed via Depends() without a trailing

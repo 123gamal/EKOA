@@ -15,6 +15,7 @@ from apps.api.models.user import User
 from apps.api.models.document import Document
 from apps.api.services import audit_service
 from ekoa_config.settings import get_settings
+from ekoa_config.logging import get_correlation_id
 from ekoa_types.document import DocumentResponse, DocumentStatus
 
 router = APIRouter(prefix="/api/v1/documents", tags=["Documents"])
@@ -87,7 +88,7 @@ async def upload_document(
     # silently swallowing the error.
     try:
         from apps.worker.tasks import process_document
-        process_document.delay(str(document.id))
+        process_document.delay(str(document.id), correlation_id=get_correlation_id())
     except Exception as e:
         document.status = DocumentStatus.ENQUEUE_FAILED
         await db.commit()

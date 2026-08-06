@@ -3,13 +3,11 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 from apps.api.db.engine import get_db
 from apps.api.dependencies.auth import get_current_user
 from apps.api.models.user import User
-from apps.api.models.organization import Organization
-from apps.api.models.org_member import OrgMember
 from apps.api.models.workspace import Workspace
 from apps.api.models.document import Document
 from apps.api.models.audit_log import AuditLog

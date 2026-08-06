@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -10,12 +10,14 @@ from langgraph.graph import StateGraph, END
 from typing_extensions import TypedDict
 
 from ekoa_config.settings import get_settings
+from ekoa_config.logging import get_logger
 
 from apps.ai.retriever import retrieve_chunks
 
 settings = get_settings()
 
-logger = logging.getLogger(__name__)
+logger = get_logger("ai.graph")
+llm_logger = get_logger("ai.llm")
 
 
 # ── State ────────────────────────────────────────────────────────────────────
@@ -115,12 +117,16 @@ def _call_llm(messages: list[dict[str, str]], context: str | None = None) -> tup
 
     Returns (answer, degraded). ``degraded`` is True only when no real LLM provider
     answered and the local fallback template was used instead.
+
+    Emits structured telemetry per call: provider, latency in ms, and token
+    counts when the provider SDK reports them (omitted as null otherwise).
     """
     user_msg = messages[-1]["content"] if messages else ""
 
     # Try DeepSeek first
     deepseek_key = settings.DEEPSEEK_API_KEY or settings.LLM_API_KEY
     if deepseek_key and not deepseek_key.startswith("sk-your"):
+        start = time.perf_counter()
         try:
             from openai import OpenAI
             client = OpenAI(
@@ -142,14 +148,31 @@ def _call_llm(messages: list[dict[str, str]], context: str | None = None) -> tup
                 temperature=0.3,
                 max_tokens=2048,
             )
+            elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+            usage = getattr(resp, "usage", None)
+            llm_logger.info(
+                "llm_call",
+                extra={
+                    "provider": "deepseek",
+                    "model": settings.DEEPSEEK_MODEL,
+                    "latency_ms": elapsed_ms,
+                    "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                    "completion_tokens": getattr(usage, "completion_tokens", None),
+                    "total_tokens": getattr(usage, "total_tokens", None),
+                },
+            )
             if resp.choices[0].message.content:
                 return resp.choices[0].message.content.strip(), False
         except Exception as exc:
-            logger.warning("DeepSeek LLM call failed (falling back): %s: %s", type(exc).__name__, exc)
+            llm_logger.warning(
+                "llm_call_failed",
+                extra={"provider": "deepseek", "model": settings.DEEPSEEK_MODEL, "error": f"{type(exc).__name__}: {exc}"},
+            )
 
     # Try Gemini fallback
     gemini_key = settings.GEMINI_API_KEY
     if gemini_key:
+        start = time.perf_counter()
         try:
             import google.generativeai as genai
             genai.configure(api_key=gemini_key)
@@ -159,11 +182,28 @@ def _call_llm(messages: list[dict[str, str]], context: str | None = None) -> tup
                 prompt += f"\n\nContext:\n{context[:10000]}"
             prompt += f"\n\nUser Question: {user_msg}"
             resp = model.generate_content(prompt)
+            elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+            usage = getattr(resp, "usage_metadata", None)
+            llm_logger.info(
+                "llm_call",
+                extra={
+                    "provider": "gemini",
+                    "model": settings.GEMINI_MODEL,
+                    "latency_ms": elapsed_ms,
+                    "prompt_tokens": getattr(usage, "prompt_token_count", None),
+                    "completion_tokens": getattr(usage, "candidates_token_count", None),
+                    "total_tokens": getattr(usage, "total_token_count", None),
+                },
+            )
             if resp.text:
                 return resp.text.strip(), False
         except Exception as exc:
-            logger.warning("Gemini LLM call failed (falling back): %s: %s", type(exc).__name__, exc)
+            llm_logger.warning(
+                "llm_call_failed",
+                extra={"provider": "gemini", "model": settings.GEMINI_MODEL, "error": f"{type(exc).__name__}: {exc}"},
+            )
 
+    llm_logger.warning("llm_fallback_used", extra={"reason": "no_provider_answered"})
     return _fallback_answer(messages, context), True
 
 
@@ -201,7 +241,6 @@ def _fallback_answer(messages: list[dict], context: str | None) -> str:
 
 def synthesize_node(state: AgentState) -> dict:
     """Synthesize the final answer from all agent outputs and context."""
-    user_msg = state["messages"][-1]["content"] if state["messages"] else ""
     chunks = state.get("context_chunks", [])
 
     context = None

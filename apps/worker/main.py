@@ -5,6 +5,9 @@ from __future__ import annotations
 from celery import Celery
 
 from ekoa_config.settings import get_settings
+from ekoa_config.logging import setup_logging
+
+setup_logging("worker")
 
 settings = get_settings()
 
@@ -23,6 +26,9 @@ app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    # Keep our shared JSON handlers; don't let Celery hijack/redirect them.
+    worker_hijack_root_logger=False,
+    worker_redirect_stdouts=False,
 )
 
 # Import tasks so they are registered

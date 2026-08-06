@@ -13,6 +13,7 @@ from apps.api.models.user import User
 from apps.api.models.workflow import Workflow, WorkflowRun
 from apps.api.services import audit_service
 from apps.worker.workflow_templates import WORKFLOW_TEMPLATES, get_template
+from ekoa_config.logging import get_correlation_id
 from ekoa_types.workflow import (
     WorkflowCreate,
     WorkflowResponse,
@@ -137,7 +138,7 @@ async def run_workflow(
 
     try:
         from apps.worker.tasks import run_workflow as run_workflow_task
-        run_workflow_task.delay(str(run.id))
+        run_workflow_task.delay(str(run.id), correlation_id=get_correlation_id())
     except Exception:
         # Worker unreachable — mark the run so the UI can retry.
         run.status = "FAILED"

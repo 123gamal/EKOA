@@ -11,3 +11,10 @@ asyncio_default_fixture_loop_scope = "session"
 
 [tool.ruff]
 line-length = 120
+extend-exclude = ["scratch"]
+
+[tool.ruff.lint]
+# Phase 2: high-signal checks only (unused imports/variables, undefined
+# names, syntax errors). Full style lint (import sorting, blind-except,
+# datetime UTC alias, etc.) is deferred to a later phase.
+select = ["E4", "E7", "E9", "F"]

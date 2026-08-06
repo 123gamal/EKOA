@@ -6,18 +6,22 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from apps.ai.graph import get_agent_graph, AgentState
 from apps.ai.deps import get_current_user, assert_workspace_access_for_user
 from apps.api.models.user import User
-from apps.api.db.engine import get_db
+from apps.api.db.engine import get_db, get_engine
 from ekoa_config.settings import get_settings
+from ekoa_config.logging import setup_logging, CorrelationIdMiddleware
 from ekoa_utils.naming import workspace_collection_name
+
+setup_logging("ai")
 
 settings = get_settings()
 
@@ -36,6 +40,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(CorrelationIdMiddleware)
 
 
 # ── Request / Response Schemas ───────────────────────────────────────────────
@@ -81,7 +87,37 @@ def _build_initial_state(req: ChatRequest) -> AgentState:
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "ekoa-ai", "version": "0.1.0"}
+    """Liveness probe that verifies real dependencies, not just the process.
+
+    Checks the database and Qdrant reachability. Returns 200 only when both
+    are healthy; otherwise 503 so Docker healthchecks fail when the service is
+    actually degraded.
+    """
+    dependencies: dict[str, str] = {}
+    try:
+        async with get_engine().connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        dependencies["database"] = "ok"
+    except Exception as exc:  # noqa: BLE001
+        dependencies["database"] = f"error: {type(exc).__name__}"
+
+    try:
+        from apps.ai.retriever import _get_qdrant
+        _get_qdrant().get_collections()
+        dependencies["qdrant"] = "ok"
+    except Exception as exc:  # noqa: BLE001
+        dependencies["qdrant"] = f"error: {type(exc).__name__}"
+
+    healthy = all(v == "ok" for v in dependencies.values())
+    body = {
+        "status": "healthy" if healthy else "unhealthy",
+        "service": "ekoa-ai",
+        "version": "0.1.0",
+        "dependencies": dependencies,
+    }
+    if not healthy:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=body)
+    return body
 
 
 @router.post("/chat", response_model=ChatResponse)

@@ -1,0 +1,45 @@
+# =============================================================================
+# EKOA CI — lint + test only (Phase 2 scope).
+# Runs on every push and pull request. Does NOT deploy and does not push
+# anywhere. This workflow only takes effect once the repository is pushed to
+# GitHub (a manual step, handled separately).
+# Coverage thresholds, security scanning, and deploy steps come in a later
+# phase.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install shared packages (from source)
+        run: |
+          pip install --no-cache-dir packages/shared-config
+          pip install --no-cache-dir packages/shared-types
+          pip install --no-cache-dir packages/shared-utils
+
+      - name: Install dependencies
+        run: pip install --no-cache-dir -r requirements-dev.txt
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Run test suite
+        run: pytest tests/ -q --tb=short
