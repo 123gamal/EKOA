@@ -1,0 +1,15 @@
+[project]
+name = "ekoa-worker"
+version = "0.1.0"
+description = "EKOA background worker service"
+requires-python = ">=3.11"
+dependencies = [
+    "celery[redis]",
+    "qdrant-client",
+    "pymupdf",
+    "python-docx",
+    "tiktoken",
+    "sentence-transformers",
+    "langchain-text-splitters",
+    "sqlalchemy",
+]

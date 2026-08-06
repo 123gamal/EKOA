@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project
+uploads/
+.tmp/
+logs/
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.git/

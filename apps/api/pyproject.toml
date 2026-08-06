@@ -1,0 +1,16 @@
+[project]
+name = "ekoa-api"
+version = "0.1.0"
+description = "EKOA REST API service"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy[asyncio]",
+    "asyncpg",
+    "alembic",
+    "python-jose[cryptography]",
+    "bcrypt>=4.0",
+    "python-multipart",
+    "pydantic-settings",
+]

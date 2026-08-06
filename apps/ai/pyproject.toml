@@ -1,0 +1,14 @@
+[project]
+name = "ekoa-ai"
+version = "0.1.0"
+description = "EKOA AI agent service"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph",
+    "langchain",
+    "qdrant-client",
+    "sentence-transformers",
+    "fastapi",
+    "uvicorn[standard]",
+    "sse-starlette",
+]
