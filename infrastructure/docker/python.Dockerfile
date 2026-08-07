@@ -52,7 +52,8 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
     langgraph langchain-core \
     sse-starlette \
     openai google-generativeai \
-    "python-jose[cryptography]" "sqlalchemy[asyncio]" asyncpg
+    "python-jose[cryptography]" "sqlalchemy[asyncio]" asyncpg \
+    email-validator
 
 COPY . .
 

@@ -253,7 +253,7 @@ function DocumentsContent() {
               <Layers className="h-5 w-5 text-[var(--primary)]" />
               Workspace Documents ({total})
             </h2>
-            <Button variant="ghost" size="sm" onClick={loadDocs}>
+            <Button variant="ghost" size="sm" onClick={() => loadDocs()}>
               <RefreshCw className="h-4 w-4" />
               Refresh Status
             </Button>

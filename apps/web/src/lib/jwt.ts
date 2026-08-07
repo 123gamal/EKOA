@@ -7,7 +7,7 @@
  * server-side on every API call via the API's `get_current_user` dependency.
  */
 
-function base64UrlToBytes(value: string): Uint8Array {
+function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
   let b64 = value.replace(/-/g, "+").replace(/_/g, "/");
   while (b64.length % 4) b64 += "=";
   const bin = atob(b64);
