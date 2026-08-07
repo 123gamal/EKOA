@@ -73,8 +73,8 @@ async def test_workflow_crud(client: AsyncClient):
     # List
     resp = await client.get(f"/api/v1/workflows/?workspace_id={ws['id']}", headers=headers)
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
-    assert resp.json()[0]["id"] == wf["id"]
+    assert resp.json()["total"] == 1
+    assert resp.json()["items"][0]["id"] == wf["id"]
 
     # Get
     resp = await client.get(f"/api/v1/workflows/{wf['id']}", headers=headers)
@@ -131,8 +131,8 @@ async def test_workflow_run_creates_run_record(client: AsyncClient):
 
     # Runs are recorded in history
     runs = (await client.get(f"/api/v1/workflows/{wf['id']}/runs", headers=headers)).json()
-    assert len(runs) == 1
-    assert runs[0]["id"] == run["id"]
+    assert runs["total"] == 1
+    assert runs["items"][0]["id"] == run["id"]
 
 
 async def test_workflow_run_auth(client: AsyncClient):
@@ -206,7 +206,7 @@ async def test_analytics_documents(client: AsyncClient):
 
     resp = await client.get("/api/v1/analytics/documents", headers=headers)
     assert resp.status_code == 200
-    docs = resp.json()["documents"]
-    assert len(docs) == 1
-    assert docs[0]["title"] == "guide.md"
-    assert docs[0]["workspace"] == "Default Workspace"
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["title"] == "guide.md"
+    assert body["items"][0]["workspace"] == "Default Workspace"

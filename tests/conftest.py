@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from apps.api.db.base import Base
 from apps.api.db.engine import get_db
 from apps.api.main import app
+from ekoa_config.rate_limit import get_rate_limiter
 
 # In-memory async SQLite database for fast unit testing
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -36,6 +37,20 @@ async def setup_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Isolate the process-wide in-memory rate-limit buckets between tests.
+
+    Without this, login/register/refresh counts from one test would bleed into
+    the next (the limiter is a module singleton keyed by client IP, and every
+    ASGI test client request shares the same ``127.0.0.1`` key).
+    """
+    limiter = get_rate_limiter()
+    limiter.reset()
+    yield
+    limiter.reset()
 
 
 @pytest.fixture

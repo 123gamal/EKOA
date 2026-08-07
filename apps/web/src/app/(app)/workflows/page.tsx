@@ -68,7 +68,10 @@ export default function WorkflowsPage() {
 
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
+  const [wfTotal, setWfTotal] = useState(0);
+  const [wfPage, setWfPage] = useState(1);
   const [loadingWorkflows, setLoadingWorkflows] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Create & run dialog
   const [creatingTemplate, setCreatingTemplate] = useState<WorkflowTemplate | null>(null);
@@ -90,15 +93,21 @@ export default function WorkflowsPage() {
     orgApi
       .list()
       .then((data) => {
-        setOrgs(data);
-        if (data.length > 0) {
-          return workspaceApi.list(data[0].id);
+        setOrgs(data.items);
+        if (data.items.length > 0) {
+          return workspaceApi.list(data.items[0].id);
         }
-        return Promise.resolve([] as Workspace[]);
+        return Promise.resolve({
+          items: [] as Workspace[],
+          total: 0,
+          page: 1,
+          page_size: 25,
+          pages: 0,
+        });
       })
       .then((wss) => {
-        setWorkspaces(wss);
-        if (wss.length > 0) setSelectedWs(wss[0].id);
+        setWorkspaces(wss.items);
+        if (wss.items.length > 0) setSelectedWs(wss.items[0].id);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoadingWs(false));
@@ -116,15 +125,32 @@ export default function WorkflowsPage() {
     workflowApi
       .list(selectedWs)
       .then((data) => {
-        setWorkflows(data);
-        if (data.length > 0) {
-          setActiveWorkflow(data[0]);
-          loadLatestRun(data[0].id);
+        setWorkflows(data.items);
+        setWfTotal(data.total);
+        setWfPage(data.page);
+        if (data.items.length > 0) {
+          setActiveWorkflow(data.items[0]);
+          loadLatestRun(data.items[0].id);
         }
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoadingWorkflows(false));
   }, [selectedWs]);
+
+  async function loadMoreWorkflows() {
+    if (loadingMore || !selectedWs) return;
+    setLoadingMore(true);
+    try {
+      const data = await workflowApi.list(selectedWs, wfPage + 1);
+      setWorkflows((prev) => [...prev, ...data.items]);
+      setWfTotal(data.total);
+      setWfPage(data.page);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load more workflows");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   // Poll active run while it is pending/running
   useEffect(() => {
@@ -136,8 +162,8 @@ export default function WorkflowsPage() {
   async function loadLatestRun(workflowId: string) {
     try {
       const runs = await workflowApi.listRuns(workflowId);
-      setRunHistory(runs);
-      if (runs.length > 0) setActiveRun(runs[0]);
+      setRunHistory(runs.items);
+      if (runs.items.length > 0) setActiveRun(runs.items[0]);
     } catch {
       // ignore
     }
@@ -148,9 +174,9 @@ export default function WorkflowsPage() {
     pollTimer.current = setInterval(async () => {
       try {
         const latest = await workflowApi.listRuns(run.workflow_id);
-        setRunHistory(latest);
-        if (latest.length > 0) setActiveRun(latest[0]);
-        const newest = latest[0];
+        setRunHistory(latest.items);
+        if (latest.items.length > 0) setActiveRun(latest.items[0]);
+        const newest = latest.items[0];
         if (newest && (newest.status === "COMPLETED" || newest.status === "FAILED")) {
           if (pollTimer.current) clearInterval(pollTimer.current);
           setPolling(false);
@@ -477,6 +503,18 @@ export default function WorkflowsPage() {
               })}
             </CardContent>
           </Card>
+        )}
+        {workflows.length > 0 && workflows.length < wfTotal && (
+          <div className="flex justify-center pt-2">
+            <Button variant="secondary" size="sm" onClick={loadMoreWorkflows} disabled={loadingMore}>
+              {loadingMore ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FolderOpen className="h-4 w-4" />
+              )}
+              Load More ({workflows.length} of {wfTotal})
+            </Button>
+          </div>
         )}
       </section>
 

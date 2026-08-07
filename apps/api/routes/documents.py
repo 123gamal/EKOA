@@ -6,7 +6,7 @@ import shutil
 import logging
 from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from apps.api.db.engine import get_db
 from apps.api.dependencies.auth import get_current_user
@@ -17,6 +17,12 @@ from apps.api.services import audit_service
 from ekoa_config.settings import get_settings
 from ekoa_config.logging import get_correlation_id
 from ekoa_types.document import DocumentResponse, DocumentStatus
+from ekoa_types.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    Paginated,
+)
 
 router = APIRouter(prefix="/api/v1/documents", tags=["Documents"])
 
@@ -101,19 +107,30 @@ async def upload_document(
     return document
 
 
-@router.get("/", response_model=list[DocumentResponse])
+@router.get("/", response_model=Paginated[DocumentResponse])
 async def list_documents(
     workspace_id: uuid.UUID = Query(..., description="Filter documents by workspace ID"),
+    page: int = Query(DEFAULT_PAGE, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Retrieve all documents uploaded within a specific workspace."""
+    """Retrieve documents uploaded within a specific workspace (paginated, latest first)."""
     # Verify the current user can access the target workspace
     await authz.assert_can_access_workspace(workspace_id, current_user, db)
 
-    stmt = select(Document).where(Document.workspace_id == workspace_id)
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
+    base = select(Document).where(Document.workspace_id == workspace_id)
+    total = (
+        await db.execute(select(func.count()).select_from(base.subquery()))
+    ).scalar_one()
+
+    stmt = (
+        base.order_by(Document.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = list((await db.execute(stmt)).scalars().all())
+    return Paginated.create(items, total, page, page_size)
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)

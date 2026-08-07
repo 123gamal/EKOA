@@ -16,21 +16,29 @@ function DocumentsContent() {
 
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [docs, setDocs] = useState<DocumentRecord[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  const loadDocs = useCallback(async () => {
-    if (!workspaceId) return;
-    try {
-      const data = await documentApi.list(workspaceId);
-      setDocs(data);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load documents");
-    }
-  }, [workspaceId]);
+  const loadDocs = useCallback(
+    async (nextPage = 1, append = false) => {
+      if (!workspaceId) return;
+      try {
+        const data = await documentApi.list(workspaceId, nextPage);
+        setTotal(data.total);
+        setPage(nextPage);
+        setDocs((prev) => (append ? [...prev, ...data.items] : data.items));
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to load documents");
+      }
+    },
+    [workspaceId]
+  );
 
   useEffect(() => {
     async function init() {
@@ -42,10 +50,10 @@ function DocumentsContent() {
         }).then((r) => r.json());
 
         const all: Workspace[] = [];
-        if (Array.isArray(orgs)) {
-          for (const org of orgs) {
+        if (orgs && Array.isArray(orgs.items)) {
+          for (const org of orgs.items) {
             const ws = await workspaceApi.list(org.id);
-            all.push(...ws);
+            all.push(...ws.items);
           }
         }
         setWorkspaces(all);
@@ -64,12 +72,36 @@ function DocumentsContent() {
     setLoading(true);
     loadDocs().finally(() => setLoading(false));
 
+    // Status poll: refresh page 1 in place and merge, so Load More pages are
+    // preserved instead of being wiped by the 4s refresh.
     const interval = setInterval(() => {
-      loadDocs();
+      documentApi
+        .list(workspaceId, 1)
+        .then((data) => {
+          setTotal(data.total);
+          setDocs((prev) => {
+            const page1Ids = new Set(data.items.map((d) => d.id));
+            const older = prev.filter((d) => !page1Ids.has(d.id));
+            return [...data.items, ...older];
+          });
+        })
+        .catch(() => {
+          // transient poll failure - keep the current list
+        });
     }, 4000);
 
     return () => clearInterval(interval);
   }, [workspaceId, loadDocs]);
+
+  async function loadMore() {
+    if (loadingMore || !workspaceId) return;
+    setLoadingMore(true);
+    try {
+      await loadDocs(page + 1, true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function uploadFile(file: File) {
     if (!workspaceId) {
@@ -219,7 +251,7 @@ function DocumentsContent() {
           <div className="flex items-center justify-between pt-2">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <Layers className="h-5 w-5 text-[var(--primary)]" />
-              Workspace Documents ({docs.length})
+              Workspace Documents ({total})
             </h2>
             <Button variant="ghost" size="sm" onClick={loadDocs}>
               <RefreshCw className="h-4 w-4" />
@@ -262,6 +294,18 @@ function DocumentsContent() {
                   </CardContent>
                 </Card>
               ))}
+            </div>
+          )}
+          {docs.length > 0 && docs.length < total && (
+            <div className="flex justify-center pt-2">
+              <Button variant="secondary" size="sm" onClick={loadMore} disabled={loadingMore}>
+                {loadingMore ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Load More ({docs.length} of {total})
+              </Button>
             </div>
           )}
         </>

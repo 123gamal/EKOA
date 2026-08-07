@@ -55,10 +55,10 @@ function ChatContent() {
         }).then((r) => r.json());
 
         const all: Workspace[] = [];
-        if (Array.isArray(orgs)) {
-          for (const org of orgs) {
+        if (orgs && Array.isArray(orgs.items)) {
+          for (const org of orgs.items) {
             const ws = await workspaceApi.list(org.id);
-            all.push(...ws);
+            all.push(...ws.items);
           }
         }
         setWorkspaces(all);

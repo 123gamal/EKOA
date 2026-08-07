@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import func, select, desc
 
 from apps.api.db.engine import get_db
 from apps.api.dependencies.auth import get_current_user
@@ -14,6 +14,12 @@ from apps.api.models.workflow import Workflow, WorkflowRun
 from apps.api.services import audit_service
 from apps.worker.workflow_templates import WORKFLOW_TEMPLATES, get_template
 from ekoa_config.logging import get_correlation_id
+from ekoa_types.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    Paginated,
+)
 from ekoa_types.workflow import (
     WorkflowCreate,
     WorkflowResponse,
@@ -41,6 +47,9 @@ async def create_workflow(
 ):
     """Create a workflow instance from a template inside a workspace."""
     await authz.assert_can_access_workspace(data.workspace_id, current_user, db)
+    org_id = await authz.org_id_for_workspace(db, data.workspace_id)
+    if org_id is not None:
+        await authz.assert_min_role(db, current_user.id, org_id, "admin")
     if get_template(data.template_id) is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -70,17 +79,29 @@ async def create_workflow(
     return workflow
 
 
-@router.get("/", response_model=list[WorkflowResponse])
+@router.get("/", response_model=Paginated[WorkflowResponse])
 async def list_workflows(
     workspace_id: uuid.UUID = Query(...),
+    page: int = Query(DEFAULT_PAGE, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """List workflows inside a workspace."""
+    """List workflows inside a workspace (paginated, latest first)."""
     await authz.assert_can_access_workspace(workspace_id, current_user, db)
-    stmt = select(Workflow).where(Workflow.workspace_id == workspace_id).order_by(desc(Workflow.created_at))
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
+
+    base = select(Workflow).where(Workflow.workspace_id == workspace_id)
+    total = (
+        await db.execute(select(func.count()).select_from(base.subquery()))
+    ).scalar_one()
+
+    stmt = (
+        base.order_by(desc(Workflow.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = list((await db.execute(stmt)).scalars().all())
+    return Paginated.create(items, total, page, page_size)
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
@@ -113,6 +134,9 @@ async def run_workflow(
     if not workflow:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
     await authz.assert_can_access_workspace(workflow.workspace_id, current_user, db)
+    org_id = await authz.org_id_for_workspace(db, workflow.workspace_id)
+    if org_id is not None:
+        await authz.assert_min_role(db, current_user.id, org_id, "admin")
 
     run = WorkflowRun(
         workflow_id=workflow.id,
@@ -151,13 +175,15 @@ async def run_workflow(
     return run
 
 
-@router.get("/{workflow_id}/runs", response_model=list[WorkflowRunResponse])
+@router.get("/{workflow_id}/runs", response_model=Paginated[WorkflowRunResponse])
 async def list_runs(
     workflow_id: uuid.UUID,
+    page: int = Query(DEFAULT_PAGE, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """List execution runs for a workflow (latest first)."""
+    """List execution runs for a workflow (paginated, latest first)."""
     stmt = select(Workflow).where(Workflow.id == workflow_id)
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
@@ -165,6 +191,15 @@ async def list_runs(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
     await authz.assert_can_access_workspace(workflow.workspace_id, current_user, db)
 
-    stmt = select(WorkflowRun).where(WorkflowRun.workflow_id == workflow_id).order_by(desc(WorkflowRun.created_at))
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
+    base = select(WorkflowRun).where(WorkflowRun.workflow_id == workflow_id)
+    total = (
+        await db.execute(select(func.count()).select_from(base.subquery()))
+    ).scalar_one()
+
+    stmt = (
+        base.order_by(desc(WorkflowRun.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = list((await db.execute(stmt)).scalars().all())
+    return Paginated.create(items, total, page, page_size)

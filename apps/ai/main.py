@@ -17,8 +17,9 @@ from apps.ai.graph import get_agent_graph, AgentState
 from apps.ai.deps import get_current_user, assert_workspace_access_for_user
 from apps.api.models.user import User
 from apps.api.db.engine import get_db, get_engine
-from ekoa_config.settings import get_settings
+from ekoa_config.settings import get_settings, resolve_cors_origins
 from ekoa_config.logging import setup_logging, CorrelationIdMiddleware
+from ekoa_config.rate_limit import RateLimitMiddleware
 from ekoa_utils.naming import workspace_collection_name
 
 setup_logging("ai")
@@ -28,10 +29,7 @@ settings = get_settings()
 app = FastAPI(title="EKOA AI Service", version="0.1.0")
 router = APIRouter(prefix="/api/v1/ai")
 
-try:
-    cors_origins = json.loads(settings.CORS_ORIGINS)
-except (json.JSONDecodeError, TypeError):
-    cors_origins = ["*"]
+cors_origins = resolve_cors_origins(settings)
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,6 +40,9 @@ app.add_middleware(
 )
 
 app.add_middleware(CorrelationIdMiddleware)
+
+# General default per-IP rate limit for every request (except /health).
+app.add_middleware(RateLimitMiddleware)
 
 
 # ── Request / Response Schemas ───────────────────────────────────────────────

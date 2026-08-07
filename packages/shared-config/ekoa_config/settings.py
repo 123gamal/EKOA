@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
+from typing import Any
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -40,7 +42,20 @@ class Settings(BaseSettings):
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # ── CORS ─────────────────────────────────────────────────────────────
-    CORS_ORIGINS: str = '["*"]'
+    # Explicit allow-list, NOT "*". FastAPI's CORSMiddleware refuses to work
+    # with allow_credentials=True + "*", and browsers reject credentialed
+    # cross-origin responses unless the origin is explicit. The frontend runs
+    # on http://localhost:3000 in local development.
+    CORS_ORIGINS: str = '["http://localhost:3000"]'
+
+    # ── Rate limiting (per process; in-memory sliding window) ────────────
+    # General default applied to every request (per client IP); tighter limits
+    # are applied to the auth endpoints which are brute-force/spam targets.
+    RATE_LIMIT_DEFAULT_LIMIT: int = 120
+    RATE_LIMIT_DEFAULT_WINDOW_SECONDS: int = 60
+    RATE_LIMIT_LOGIN_LIMIT: int = 10
+    RATE_LIMIT_REGISTER_LIMIT: int = 10
+    RATE_LIMIT_REFRESH_LIMIT: int = 30
 
     # ── LLM ──────────────────────────────────────────────────────────────
     LLM_PROVIDER: str = "deepseek"
@@ -78,6 +93,37 @@ class Settings(BaseSettings):
                 "JWT_SECRET_KEY must be set to a strong random value when "
                 "ENVIRONMENT != development."
             )
+
+
+def resolve_cors_origins(settings: Settings, *, allow_credentials: bool = True) -> list[str]:
+    """Parse ``CORS_ORIGINS`` and fail loudly on the wildcard+credentials combo.
+
+    ``allow_credentials=True`` combined with ``"*"`` in the origins list is an
+    invalid/unsafe configuration: the browser rejects credentialed responses
+    when the origin is a wildcard, so anything relying on cookies would silently
+    break while appearing configured. Raising at startup makes such a regression
+    impossible to ship unnoticed.
+    """
+    raw = settings.CORS_ORIGINS or "[]"
+    try:
+        origins: Any = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"CORS_ORIGINS must be a JSON array of origin strings, got: {raw!r}"
+        ) from exc
+
+    if not isinstance(origins, list) or not all(isinstance(o, str) for o in origins):
+        raise RuntimeError(
+            f"CORS_ORIGINS must be a JSON array of origin strings, got: {raw!r}"
+        )
+
+    if allow_credentials and "*" in origins:
+        raise RuntimeError(
+            "CORS misconfiguration: allow_credentials=True cannot be combined "
+            "with allow_origins containing '*'. Set CORS_ORIGINS to explicit "
+            "origins (e.g. [\"http://localhost:3000\"]) in .env."
+        )
+    return origins
 
 
 @lru_cache(maxsize=1)

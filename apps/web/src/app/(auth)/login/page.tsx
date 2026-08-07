@@ -27,7 +27,9 @@ function LoginForm() {
 
     try {
       const data = await authApi.login({ email, password });
-      setTokens(data.access_token, data.refresh_token);
+      // Refresh token is delivered in an HttpOnly cookie by the API; only the
+      // access token is persisted client-side.
+      setTokens(data.access_token);
       router.push(redirect);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");

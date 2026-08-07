@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { isAccessTokenValid } from "@/lib/jwt";
 
 const publicPaths = ["/", "/login", "/register"];
 
@@ -12,7 +13,13 @@ const protectedPrefixes = [
   "/settings",
 ];
 
-export function middleware(request: NextRequest) {
+function redirectToLogin(request: NextRequest) {
+  const loginUrl = new URL("/login", request.url);
+  loginUrl.searchParams.set("redirect", request.nextUrl.pathname + request.nextUrl.search);
+  return NextResponse.redirect(loginUrl);
+}
+
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (publicPaths.includes(pathname)) {
@@ -32,9 +39,16 @@ export function middleware(request: NextRequest) {
     request.headers.get("authorization")?.replace("Bearer ", "");
 
   if (!token) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("redirect", pathname + request.nextUrl.search);
-    return NextResponse.redirect(loginUrl);
+    return redirectToLogin(request);
+  }
+
+  // Verify the JWT signature + expiry before treating the request as
+  // authenticated. A cookie containing an arbitrary value no longer passes.
+  // (Edge runtime: WebCrypto HS256 check; the API still fully re-verifies the
+  // token server-side on every protected call.)
+  const secret = process.env.JWT_SECRET_KEY;
+  if (!secret || !(await isAccessTokenValid(token, secret))) {
+    return redirectToLogin(request);
   }
 
   return NextResponse.next();

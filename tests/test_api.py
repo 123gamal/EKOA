@@ -164,10 +164,11 @@ async def test_auth_logout_edge_cases(client: AsyncClient):
     })
     at, rt = login.json()["access_token"], login.json()["refresh_token"]
 
-    # Logout without refresh_token in body
+    # Logout without a refresh token: since Phase 3 the refresh token lives in
+    # an HttpOnly cookie, so an empty logout is idempotent (clears the cookie).
     resp = await client.post("/api/v1/auth/logout", json={},
                              headers={"Authorization": f"Bearer {at}"})
-    assert resp.status_code == 400
+    assert resp.status_code == 204
 
     # Logout without auth header
     resp = await client.post("/api/v1/auth/logout", json={"refresh_token": rt})
@@ -211,7 +212,7 @@ async def test_org_workspace_flow(client: AsyncClient):
 
     list_resp = await client.get("/api/v1/organizations/", headers=headers)
     assert list_resp.status_code == 200
-    assert len(list_resp.json()) >= 1
+    assert list_resp.json()["total"] >= 1
 
     ws_resp = await client.post("/api/v1/workspaces/", json={
         "name": "Engineering", "description": "Eng team", "organization_id": org["id"],
@@ -221,8 +222,8 @@ async def test_org_workspace_flow(client: AsyncClient):
     assert ws["name"] == "Engineering" and ws["organization_id"] == org["id"]
 
     list_ws = await client.get(f"/api/v1/workspaces/?organization_id={org['id']}", headers=headers)
-    assert list_ws.status_code == 200 and len(list_ws.json()) == 1
-    assert list_ws.json()[0]["id"] == ws["id"]
+    assert list_ws.status_code == 200 and len(list_ws.json()["items"]) == 1
+    assert list_ws.json()["items"][0]["id"] == ws["id"]
 
     get_ws = await client.get(f"/api/v1/workspaces/{ws['id']}", headers=headers)
     assert get_ws.status_code == 200 and get_ws.json()["name"] == "Engineering"
@@ -326,8 +327,8 @@ async def test_document_upload_and_list(client: AsyncClient):
     doc_id = doc["id"]
 
     list_docs = await client.get(f"/api/v1/documents/?workspace_id={ws['id']}", headers=headers)
-    assert list_docs.status_code == 200 and len(list_docs.json()) == 1
-    assert list_docs.json()[0]["id"] == doc_id
+    assert list_docs.status_code == 200 and len(list_docs.json()["items"]) == 1
+    assert list_docs.json()["items"][0]["id"] == doc_id
 
     get_doc = await client.get(f"/api/v1/documents/{doc_id}", headers=headers)
     assert get_doc.status_code == 200 and get_doc.json()["title"] == "test.txt"
@@ -423,7 +424,7 @@ async def test_org_isolation(client: AsyncClient):
 
     # User B should NOT see User A's org
     list_b = await client.get("/api/v1/organizations/", headers=headers_b)
-    assert len(list_b.json()) == 0  # B is not a member of Org A
+    assert list_b.json()["total"] == 0  # B is not a member of Org A
 
     # User B should not be able to read User A's org by slug
     resp = await client.get("/api/v1/organizations/org-a", headers=headers_b)
@@ -496,7 +497,7 @@ async def test_document_cross_tenant_isolation(client: AsyncClient):
 
     # Owner (A) can still access everything
     resp = await client.get(f"/api/v1/documents/?workspace_id={ws['id']}", headers=ha)
-    assert resp.status_code == 200 and len(resp.json()) == 1
+    assert resp.status_code == 200 and len(resp.json()["items"]) == 1
 
 
 async def test_register_with_organization_name(client: AsyncClient):
@@ -515,9 +516,9 @@ async def test_register_with_organization_name(client: AsyncClient):
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
     orgs = (await client.get("/api/v1/organizations/", headers=headers)).json()
-    assert len(orgs) == 1
-    assert orgs[0]["name"] == "My Startup Inc."
+    assert orgs["total"] == 1
+    assert orgs["items"][0]["name"] == "My Startup Inc."
 
-    wss = (await client.get(f"/api/v1/workspaces/?organization_id={orgs[0]['id']}", headers=headers)).json()
-    assert len(wss) == 1
-    assert wss[0]["name"] == "Default Workspace"
+    wss = (await client.get(f"/api/v1/workspaces/?organization_id={orgs['items'][0]['id']}", headers=headers)).json()
+    assert wss["total"] == 1
+    assert wss["items"][0]["name"] == "Default Workspace"

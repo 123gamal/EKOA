@@ -31,9 +31,9 @@ export default function DashboardPage() {
     orgApi
       .list()
       .then((data) => {
-        setOrgs(data);
-        if (data.length > 0) setSelectedOrg(data[0].id);
-        if (data.length === 0) setShowOrgForm(true);
+        setOrgs(data.items);
+        if (data.items.length > 0) setSelectedOrg(data.items[0].id);
+        if (data.items.length === 0) setShowOrgForm(true);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -46,7 +46,7 @@ export default function DashboardPage() {
     }
     workspaceApi
       .list(selectedOrg)
-      .then(setWorkspaces)
+      .then((data) => setWorkspaces(data.items))
       .catch((e) => setError(e.message));
   }, [selectedOrg]);
 

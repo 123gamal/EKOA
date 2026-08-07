@@ -18,6 +18,14 @@ from apps.api.models.document import Document
 # DB dependency in every route. FastAPI resolves the inner Depends() calls.
 ORG_ACCESS_DEP: Depends = Depends(get_current_user)
 
+# Role hierarchy already present in the data model (org_members.role column).
+# No new roles introduced; higher level = more privileged.
+ROLE_LEVELS: dict[str, int] = {
+    "owner": 3,
+    "admin": 2,
+    "member": 1,
+}
+
 
 async def _org_id_for_workspace(db: AsyncSession, workspace_id: uuid.UUID) -> uuid.UUID | None:
     stmt = select(Workspace.organization_id).where(Workspace.id == workspace_id)
@@ -33,6 +41,51 @@ async def _org_id_for_document(db: AsyncSession, document_id: uuid.UUID) -> uuid
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
+
+
+async def org_id_for_workspace(db: AsyncSession, workspace_id: uuid.UUID) -> uuid.UUID | None:
+    """Public helper: resolve the organization that owns a workspace."""
+    return await _org_id_for_workspace(db, workspace_id)
+
+
+async def get_org_role(db: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID) -> str | None:
+    """Return the caller's role in an organization (or None if not a member)."""
+    stmt = select(OrgMember.role).where(
+        OrgMember.organization_id == org_id,
+        OrgMember.user_id == user_id,
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def assert_min_role(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    org_id: uuid.UUID,
+    min_role: str,
+) -> None:
+    """Raise 403 unless the caller's role in the org meets ``min_role``.
+
+    Hierarchy (owner > admin > member) is defined in :data:`ROLE_LEVELS`.
+    This is a foundational RBAC check on top of plain membership: it must be
+    composed with an existing ``assert_org_membership`` (or the equivalent
+    ``assert_can_access_*``) check, and is exercised meaningfully once the
+    invite flow (FR-202) exists to create non-owner members.
+    """
+    if min_role not in ROLE_LEVELS:
+        raise ValueError(f"Unknown role: {min_role!r}")
+
+    role = await get_org_role(db, user_id, org_id)
+    if role is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this organization",
+        )
+    if ROLE_LEVELS.get(role, 0) < ROLE_LEVELS[min_role]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to perform this action",
+        )
 
 
 async def assert_org_membership(

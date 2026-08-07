@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { analyticsApi, type AnalyticsOverview } from "@/lib/api";
 
 function MetricCard({
@@ -76,6 +77,9 @@ function actionLabel(action: string) {
 export default function AnalyticsPage() {
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [docRows, setDocRows] = useState<{ id: string; title: string; status: string; chunk_count: number; workspace: string; created_at: string }[]>([]);
+  const [docTotal, setDocTotal] = useState(0);
+  const [docPage, setDocPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -83,11 +87,28 @@ export default function AnalyticsPage() {
     Promise.all([analyticsApi.overview(), analyticsApi.documents()])
       .then(([ov, docs]) => {
         setOverview(ov);
-        setDocRows(docs.documents);
+        setDocRows(docs.items);
+        setDocTotal(docs.total);
+        setDocPage(docs.page);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  async function loadMoreDocs() {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const data = await analyticsApi.documents(docPage + 1);
+      setDocRows((prev) => [...prev, ...data.items]);
+      setDocTotal(data.total);
+      setDocPage(data.page);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load more documents");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -353,7 +374,7 @@ export default function AnalyticsPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-base">Documents Processed</h2>
-            <Badge variant="info">{docRows.length} documents</Badge>
+            <Badge variant="info">{docTotal} documents</Badge>
           </div>
         </CardHeader>
         <CardContent>
@@ -362,19 +383,20 @@ export default function AnalyticsPage() {
               No documents found in your workspaces.
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-[var(--border)] text-xs text-[var(--muted-foreground)] uppercase">
-                  <tr>
-                    <th className="py-3 px-2">Title</th>
-                    <th className="py-3 px-2">Workspace</th>
-                    <th className="py-3 px-2">Chunks</th>
-                    <th className="py-3 px-2">Status</th>
-                    <th className="py-3 px-2">Uploaded</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border)]">
-                  {docRows.slice(0, 12).map((d) => (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-[var(--border)] text-xs text-[var(--muted-foreground)] uppercase">
+                    <tr>
+                      <th className="py-3 px-2">Title</th>
+                      <th className="py-3 px-2">Workspace</th>
+                      <th className="py-3 px-2">Chunks</th>
+                      <th className="py-3 px-2">Status</th>
+                      <th className="py-3 px-2">Uploaded</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border)]">
+                    {docRows.map((d) => (
                     <tr key={d.id} className="hover:bg-[var(--muted)]/50 transition">
                       <td className="py-3 px-2 font-medium max-w-xs truncate">{d.title}</td>
                       <td className="py-3 px-2 text-xs text-[var(--muted-foreground)]">{d.workspace}</td>
@@ -399,7 +421,20 @@ export default function AnalyticsPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+              {docRows.length < docTotal && (
+                <div className="flex justify-center pt-3">
+                  <Button variant="secondary" size="sm" onClick={loadMoreDocs} disabled={loadingMore}>
+                    {loadingMore ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Activity className="h-4 w-4" />
+                    )}
+                    Load More ({docRows.length} of {docTotal})
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from apps.api.db.engine import get_db
 from apps.api.dependencies.auth import get_current_user
@@ -13,6 +14,11 @@ from apps.api.models.document import Document
 from apps.api.models.audit_log import AuditLog
 from apps.api.models.workflow import WorkflowRun, Workflow
 from apps.api.services import org_service
+from ekoa_types.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+)
 
 router = APIRouter(prefix="/api/v1/analytics", tags=["Analytics"])
 
@@ -123,23 +129,29 @@ async def analytics_overview(
 
 @router.get("/documents")
 async def analytics_documents(
+    page: int = Query(DEFAULT_PAGE, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description="Items per page"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Per-document processing statistics for the current user's workspaces."""
+    """Per-document processing statistics for the current user's workspaces (paginated, latest first)."""
     _, workspace_ids = await _user_scope(db, current_user.id)
     if not workspace_ids:
-        return {"documents": []}
+        return {"items": [], "total": 0, "page": page, "page_size": page_size, "pages": 0}
 
-    stmt = (
+    base = (
         select(Document, Workspace.name)
         .join(Workspace, Workspace.id == Document.workspace_id)
         .where(Document.workspace_id.in_(workspace_ids))
-        .order_by(Document.created_at.desc())
     )
+    total = (
+        await db.execute(select(func.count()).select_from(base.subquery()))
+    ).scalar_one()
+
+    stmt = base.order_by(Document.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
     rows = (await db.execute(stmt)).all()
     return {
-        "documents": [
+        "items": [
             {
                 "id": str(doc.id),
                 "title": doc.title,
@@ -150,5 +162,9 @@ async def analytics_documents(
                 "created_at": doc.created_at.isoformat(),
             }
             for doc, ws_name in rows
-        ]
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": math.ceil(total / page_size) if total else 0,
     }

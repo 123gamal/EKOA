@@ -13,6 +13,12 @@ from ekoa_types.organization import (
     OrganizationCreate,
     OrganizationResponse,
 )
+from ekoa_types.pagination import (
+    DEFAULT_PAGE,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    Paginated,
+)
 from ekoa_types.user import UserBase, UserCreate, UserResponse
 from ekoa_types.workflow import (
     WorkflowCreate,
@@ -43,6 +49,11 @@ __all__ = [
     "OrganizationBase",
     "OrganizationCreate",
     "OrganizationResponse",
+    # pagination
+    "DEFAULT_PAGE",
+    "DEFAULT_PAGE_SIZE",
+    "MAX_PAGE_SIZE",
+    "Paginated",
     # user
     "UserBase",
     "UserCreate",

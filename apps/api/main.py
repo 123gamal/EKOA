@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,8 +7,9 @@ from sqlalchemy import text
 
 from apps.api.routes import auth, organizations, workspaces, documents, workflows, analytics
 from apps.api.db.engine import get_engine
-from ekoa_config.settings import get_settings
+from ekoa_config.settings import get_settings, resolve_cors_origins
 from ekoa_config.logging import setup_logging, CorrelationIdMiddleware
+from ekoa_config.rate_limit import RateLimitMiddleware
 
 # Import models so they are registered on Base.metadata (required for Alembic
 # autogenerate; the schema itself is applied by migrations, not create_all).
@@ -45,11 +45,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware from settings
-try:
-    cors_origins = json.loads(settings.CORS_ORIGINS)
-except (json.JSONDecodeError, TypeError):
-    cors_origins = ["*"]
+# CORS middleware from settings. The origins list is validated at startup:
+# combining allow_credentials=True with "*" raises a RuntimeError instead of
+# silently misconfiguring cross-origin requests.
+cors_origins = resolve_cors_origins(settings)
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,6 +61,11 @@ app.add_middleware(
 # Correlation middleware added after CORS so it runs closest to the handlers
 # and its request log line covers the handled request/response.
 app.add_middleware(CorrelationIdMiddleware)
+
+# General default per-IP rate limit for every request (except /health). Tight
+# per-route limits for /auth/login, /auth/register, /auth/refresh are declared
+# as dependencies on those routes in apps.api.routes.auth.
+app.add_middleware(RateLimitMiddleware)
 
 # Register routers
 app.include_router(auth.router)
