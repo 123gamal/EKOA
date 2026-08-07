@@ -18,35 +18,35 @@ __pycache__/
 *.so
 *.egg
 *.egg-info/
-dist/
-build/
-eggs/
+/dist/
+/build/
+/eggs/
 *.whl
 pip-log.txt
 pip-delete-this-directory.txt
-.Python
-develop-eggs/
+/.Python
+/develop-eggs/
 /lib/
 /lib64/
-parts/
-sdist/
-var/
-*.manifest
-*.spec
+/parts/
+/sdist/
+/var/
+/*.manifest
+/*.spec
 
 # Virtual environments
 .venv/
 venv/
-ENV/
-env/
+/ENV/
+/env/
 
 # Testing & Coverage
-htmlcov/
+/htmlcov/
 .tox/
 .nox/
 .coverage
 .coverage.*
-.cache
+/.cache
 nosetests.xml
 coverage.xml
 *.cover
@@ -71,14 +71,14 @@ pnpm-debug.log*
 
 # Next.js
 .next/
-out/
+/out/
 
 # Nuxt.js
 .nuxt/
 
 # Build output
-dist/
-build/
+/dist/
+/build/
 
 # -----------------------------------------------------------------------------
 # Docker
@@ -113,27 +113,29 @@ Desktop.ini
 # -----------------------------------------------------------------------------
 # Logs & Temp
 # -----------------------------------------------------------------------------
-logs/
+/logs/
 *.log
-tmp/
-temp/
+/tmp/
+/temp/
 
 # -----------------------------------------------------------------------------
-# Data & Models (large files)
+# Data & Models (large files) – anchored to the repo root so these generic
+# extensions/dir names cannot silently swallow real source files nested under
+# apps/, packages/, tests/ or infrastructure/ (e.g. the lib/ and models/ bugs).
 # -----------------------------------------------------------------------------
 *.db
 *.sqlite
 *.sqlite3
-*.h5
-*.hdf5
-*.pkl
-*.pickle
-*.parquet
-*.arrow
-*.model
-*.bin
-data/raw/
-data/processed/
+/*.h5
+/*.hdf5
+/*.pkl
+/*.pickle
+/*.parquet
+/*.arrow
+/*.model
+/*.bin
+/data/raw/
+/data/processed/
 /models/
 
 # -----------------------------------------------------------------------------
