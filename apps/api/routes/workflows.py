@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select, desc
 
@@ -90,7 +90,10 @@ async def list_workflows(
     """List workflows inside a workspace (paginated, latest first)."""
     await authz.assert_can_access_workspace(workspace_id, current_user, db)
 
-    base = select(Workflow).where(Workflow.workspace_id == workspace_id)
+    base = select(Workflow).where(
+        Workflow.workspace_id == workspace_id,
+        Workflow.deleted_at.is_(None),
+    )
     total = (
         await db.execute(select(func.count()).select_from(base.subquery()))
     ).scalar_one()
@@ -111,13 +114,52 @@ async def get_workflow(
     db: AsyncSession = Depends(get_db)
 ):
     """Retrieve a single workflow instance."""
-    stmt = select(Workflow).where(Workflow.id == workflow_id)
+    stmt = select(Workflow).where(
+        Workflow.id == workflow_id,
+        Workflow.deleted_at.is_(None),
+    )
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
     if not workflow:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
     await authz.assert_can_access_workspace(workflow.workspace_id, current_user, db)
     return workflow
+
+
+@router.delete("/{workflow_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workflow(
+    workflow_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Soft-delete a workflow (admin role or higher). The row is kept with deleted_at set."""
+    stmt = select(Workflow).where(
+        Workflow.id == workflow_id,
+        Workflow.deleted_at.is_(None),
+    )
+    result = await db.execute(stmt)
+    workflow = result.scalar_one_or_none()
+    if not workflow:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
+    await authz.assert_can_access_workspace(workflow.workspace_id, current_user, db)
+
+    org_id = await authz.org_id_for_workspace(db, workflow.workspace_id)
+    if org_id is not None:
+        await authz.assert_min_role(db, current_user.id, org_id, "admin")
+
+    workflow.deleted_at = datetime.now(timezone.utc)
+    db.add(workflow)
+    await db.commit()
+
+    await audit_service.log_action(
+        db,
+        user_id=current_user.id,
+        action="workflow.delete",
+        resource_type="workflows",
+        resource_id=workflow.id,
+        details={"name": workflow.name, "workspace_id": str(workflow.workspace_id)}
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{workflow_id}/run", response_model=WorkflowRunResponse, status_code=status.HTTP_201_CREATED)
@@ -128,7 +170,10 @@ async def run_workflow(
     db: AsyncSession = Depends(get_db)
 ):
     """Trigger an execution of a workflow. Enqueues the run on the Celery worker."""
-    stmt = select(Workflow).where(Workflow.id == workflow_id)
+    stmt = select(Workflow).where(
+        Workflow.id == workflow_id,
+        Workflow.deleted_at.is_(None),
+    )
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
     if not workflow:
@@ -184,7 +229,10 @@ async def list_runs(
     db: AsyncSession = Depends(get_db)
 ):
     """List execution runs for a workflow (paginated, latest first)."""
-    stmt = select(Workflow).where(Workflow.id == workflow_id)
+    stmt = select(Workflow).where(
+        Workflow.id == workflow_id,
+        Workflow.deleted_at.is_(None),
+    )
     result = await db.execute(stmt)
     workflow = result.scalar_one_or_none()
     if not workflow:

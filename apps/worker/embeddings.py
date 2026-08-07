@@ -50,8 +50,16 @@ def index_chunks(
     document_id: UUID,
     chunks: list[str],
     embeddings: list[list[float]],
+    organization_id: UUID | None = None,
+    workspace_id: UUID | None = None,
 ) -> int:
-    """Index document chunks into a Qdrant collection."""
+    """Index document chunks into a Qdrant collection.
+
+    Each point carries tenant identifiers (``organization_id`` and
+    ``workspace_id``) in its payload so retrieval can be strictly filtered on
+    them as defense-in-depth, in addition to the workspace-scoped collection
+    name.
+    """
     client = get_qdrant_client()
     points = []
     for i, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
@@ -64,6 +72,8 @@ def index_chunks(
                     "document_id": str(document_id),
                     "chunk_index": i,
                     "text": chunk_text,
+                    "organization_id": str(organization_id) if organization_id else None,
+                    "workspace_id": str(workspace_id) if workspace_id else None,
                 },
             )
         )

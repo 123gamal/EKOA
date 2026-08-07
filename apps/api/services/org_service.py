@@ -38,18 +38,24 @@ async def create_organization(
 
 
 async def get_user_organizations(db: AsyncSession, user_id: uuid.UUID) -> list[Organization]:
-    """Retrieve all organizations where the user has active membership."""
+    """Retrieve all non-deleted organizations where the user has active membership."""
     stmt = (
         select(Organization)
         .join(OrgMember, OrgMember.organization_id == Organization.id)
-        .where(OrgMember.user_id == user_id)
+        .where(
+            OrgMember.user_id == user_id,
+            Organization.deleted_at.is_(None),
+        )
     )
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
 
 async def get_organization_by_slug(db: AsyncSession, slug: str) -> Organization | None:
-    """Retrieve an organization by slug."""
-    stmt = select(Organization).where(Organization.slug == slug)
+    """Retrieve a non-deleted organization by slug."""
+    stmt = select(Organization).where(
+        Organization.slug == slug,
+        Organization.deleted_at.is_(None),
+    )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()

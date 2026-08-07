@@ -11,6 +11,7 @@ from apps.api.db.engine import get_db
 from apps.api.dependencies.auth import get_current_user
 from apps.api.models.user import User
 from apps.api.models.org_member import OrgMember
+from apps.api.models.organization import Organization
 from apps.api.models.workspace import Workspace
 from apps.api.models.document import Document
 
@@ -28,16 +29,25 @@ ROLE_LEVELS: dict[str, int] = {
 
 
 async def _org_id_for_workspace(db: AsyncSession, workspace_id: uuid.UUID) -> uuid.UUID | None:
-    stmt = select(Workspace.organization_id).where(Workspace.id == workspace_id)
+    # A soft-deleted workspace is treated as non-existent.
+    stmt = select(Workspace.organization_id).where(
+        Workspace.id == workspace_id,
+        Workspace.deleted_at.is_(None),
+    )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
 
 async def _org_id_for_document(db: AsyncSession, document_id: uuid.UUID) -> uuid.UUID | None:
+    # Soft-deleted documents and workspaces resolve to no org → callers get 404.
     stmt = (
         select(Workspace.organization_id)
         .join(Document, Document.workspace_id == Workspace.id)
-        .where(Document.id == document_id)
+        .where(
+            Document.id == document_id,
+            Document.deleted_at.is_(None),
+            Workspace.deleted_at.is_(None),
+        )
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
@@ -91,10 +101,15 @@ async def assert_min_role(
 async def assert_org_membership(
     db: AsyncSession, user_id: uuid.UUID, org_id: uuid.UUID
 ) -> None:
-    """Raise 403 if the user is not an active member of the organization."""
-    stmt = select(OrgMember).where(
-        OrgMember.organization_id == org_id,
-        OrgMember.user_id == user_id,
+    """Raise 403 if the user is not an active member of a non-deleted organization."""
+    stmt = (
+        select(OrgMember)
+        .join(Organization, Organization.id == OrgMember.organization_id)
+        .where(
+            OrgMember.organization_id == org_id,
+            OrgMember.user_id == user_id,
+            Organization.deleted_at.is_(None),
+        )
     )
     result = await db.execute(stmt)
     if result.scalar_one_or_none() is None:

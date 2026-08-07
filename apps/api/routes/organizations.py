@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 
@@ -68,7 +69,10 @@ async def list_orgs(
     base = (
         select(Organization)
         .join(OrgMember, OrgMember.organization_id == Organization.id)
-        .where(OrgMember.user_id == current_user.id)
+        .where(
+            OrgMember.user_id == current_user.id,
+            Organization.deleted_at.is_(None),
+        )
     )
     total = (
         await db.execute(select(func.count()).select_from(base.subquery()))
@@ -95,3 +99,34 @@ async def get_org(
 
     await authz.assert_org_membership(db, current_user.id, org.id)
     return org
+
+
+@router.delete("/{slug}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_org(
+    slug: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Soft-delete an organization (owner only). The row is kept with deleted_at set."""
+    org = await org_service.get_organization_by_slug(db, slug)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found"
+        )
+
+    await authz.assert_min_role(db, current_user.id, org.id, "owner")
+
+    org.deleted_at = datetime.now(timezone.utc)
+    db.add(org)
+    await db.commit()
+
+    await audit_service.log_action(
+        db,
+        user_id=current_user.id,
+        action="organization.delete",
+        resource_type="organizations",
+        resource_id=org.id,
+        details={"name": org.name, "slug": org.slug}
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -2,6 +2,7 @@
 
 from ekoa_types.auth import LoginRequest, RegisterRequest, TokenPair
 from ekoa_types.chat import AgentAction, ChatMessage, ChatRequest, ChatResponse
+from ekoa_types.conversation import ConversationResponse, MessageResponse
 from ekoa_types.document import (
     DocumentBase,
     DocumentCreate,
@@ -40,6 +41,9 @@ __all__ = [
     "ChatMessage",
     "ChatRequest",
     "ChatResponse",
+    # conversation
+    "ConversationResponse",
+    "MessageResponse",
     # document
     "DocumentBase",
     "DocumentCreate",

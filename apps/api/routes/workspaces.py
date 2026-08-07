@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 
@@ -10,6 +11,7 @@ from apps.api.dependencies.auth import get_current_user
 from apps.api.dependencies import authz
 from apps.api.models.user import User
 from apps.api.models.workspace import Workspace
+from apps.api.models.organization import Organization
 from apps.api.services import workspace_service, audit_service
 from ekoa_types.workspace import WorkspaceCreate, WorkspaceResponse
 from ekoa_types.pagination import (
@@ -63,7 +65,15 @@ async def list_workspaces(
     """Retrieve workspaces belonging to a specific organization (paginated, latest first)."""
     await authz.assert_can_access_org(organization_id, current_user, db)
 
-    base = select(Workspace).where(Workspace.organization_id == organization_id)
+    base = (
+        select(Workspace)
+        .join(Organization, Organization.id == Workspace.organization_id)
+        .where(
+            Workspace.organization_id == organization_id,
+            Workspace.deleted_at.is_(None),
+            Organization.deleted_at.is_(None),
+        )
+    )
     total = (
         await db.execute(select(func.count()).select_from(base.subquery()))
     ).scalar_one()
@@ -93,3 +103,35 @@ async def get_workspace(
             detail="Workspace not found"
         )
     return workspace
+
+
+@router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace(
+    workspace_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Soft-delete a workspace (admin role or higher). The row is kept with deleted_at set."""
+    workspace = await workspace_service.get_workspace_by_id(db, workspace_id)
+    if not workspace:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace not found"
+        )
+
+    await authz.assert_can_access_org(workspace.organization_id, current_user, db)
+    await authz.assert_min_role(db, current_user.id, workspace.organization_id, "admin")
+
+    workspace.deleted_at = datetime.now(timezone.utc)
+    db.add(workspace)
+    await db.commit()
+
+    await audit_service.log_action(
+        db,
+        user_id=current_user.id,
+        action="workspace.delete",
+        resource_type="workspaces",
+        resource_id=workspace.id,
+        details={"name": workspace.name, "organization_id": str(workspace.organization_id)}
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

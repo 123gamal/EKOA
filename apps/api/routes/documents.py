@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import uuid
 import os
-import shutil
+import hashlib
 import logging
-from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, status
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 
@@ -13,6 +14,7 @@ from apps.api.dependencies.auth import get_current_user
 from apps.api.dependencies import authz
 from apps.api.models.user import User
 from apps.api.models.document import Document
+from apps.api.models.document_version import DocumentVersion
 from apps.api.services import audit_service
 from ekoa_config.settings import get_settings
 from ekoa_config.logging import get_correlation_id
@@ -54,15 +56,20 @@ async def upload_document(
     local_filename = f"{file_id}{extension}"
     file_path = os.path.join(UPLOAD_DIR, local_filename)
 
-    # Save file contents locally
+    # Save file contents locally, computing the sha256 checksum while streaming
+    # so we never hold the whole file in memory and never read it twice.
+    file_sha256 = hashlib.sha256()
     try:
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            while chunk := file.file.read(1024 * 1024):
+                buffer.write(chunk)
+                file_sha256.update(chunk)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Could not save file: {str(e)}"
         )
+    checksum = file_sha256.hexdigest()
 
     # Create Document metadata in DB
     document = Document(
@@ -75,7 +82,22 @@ async def upload_document(
         uploaded_by=current_user.id
     )
 
+    # Record version 1 of this document. Language detection of the uploaded
+    # file is intentionally not performed here: no language-detection library
+    # (langdetect/langid/py3langid) exists in the dependency stack, and adding
+    # one would require a new dependency (blocked while the image registry is
+    # unreachable). Re-upload to a new version (N+1) is a future phase.
+    document_version = DocumentVersion(
+        document_id=document.id,
+        version=1,
+        file_path=file_path,
+        checksum=checksum,
+        status=DocumentStatus.PENDING,
+        uploaded_by=current_user.id
+    )
+
     db.add(document)
+    db.add(document_version)
     await db.commit()
     await db.refresh(document)
 
@@ -119,7 +141,10 @@ async def list_documents(
     # Verify the current user can access the target workspace
     await authz.assert_can_access_workspace(workspace_id, current_user, db)
 
-    base = select(Document).where(Document.workspace_id == workspace_id)
+    base = select(Document).where(
+        Document.workspace_id == workspace_id,
+        Document.deleted_at.is_(None),
+    )
     total = (
         await db.execute(select(func.count()).select_from(base.subquery()))
     ).scalar_one()
@@ -143,7 +168,10 @@ async def get_document(
     # Verify the current user can access the document (404 if not found in an accessible org)
     await authz.assert_can_access_document(document_id, current_user, db)
 
-    stmt = select(Document).where(Document.id == document_id)
+    stmt = select(Document).where(
+        Document.id == document_id,
+        Document.deleted_at.is_(None),
+    )
     result = await db.execute(stmt)
     document = result.scalar_one_or_none()
     if not document:
@@ -152,3 +180,72 @@ async def get_document(
             detail="Document not found"
         )
     return document
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    document_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Soft-delete a document. The row is kept with deleted_at set."""
+    await authz.assert_can_access_document(document_id, current_user, db)
+
+    stmt = select(Document).where(
+        Document.id == document_id,
+        Document.deleted_at.is_(None),
+    )
+    result = await db.execute(stmt)
+    document = result.scalar_one_or_none()
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+
+    document.deleted_at = datetime.now(timezone.utc)
+    db.add(document)
+    await db.commit()
+
+    await audit_service.log_action(
+        db,
+        user_id=current_user.id,
+        action="document.delete",
+        resource_type="documents",
+        resource_id=document.id,
+        details={"title": document.title, "workspace_id": str(document.workspace_id)}
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{document_id}/versions")
+async def list_document_versions(
+    document_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """List all persisted versions of a document (oldest first)."""
+    await authz.assert_can_access_document(document_id, current_user, db)
+
+    stmt = (
+        select(DocumentVersion)
+        .where(DocumentVersion.document_id == document_id)
+        .order_by(DocumentVersion.version.asc())
+    )
+    result = await db.execute(stmt)
+    versions = result.scalars().all()
+
+    return {
+        "document_id": str(document_id),
+        "items": [
+            {
+                "id": str(v.id),
+                "version": v.version,
+                "checksum": v.checksum,
+                "status": v.status,
+                "uploaded_by": str(v.uploaded_by),
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+            }
+            for v in versions
+        ],
+    }

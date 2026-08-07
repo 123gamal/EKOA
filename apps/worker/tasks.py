@@ -45,6 +45,7 @@ def process_document_sync(document_id: str) -> None:
       task must NOT retry.
     """
     from apps.worker.embeddings import ensure_collection, generate_embeddings, index_chunks
+    from apps.api.models.workspace import Workspace
 
     doc_uuid = uuid.UUID(document_id)
     engine = get_sync_engine()
@@ -55,6 +56,9 @@ def process_document_sync(document_id: str) -> None:
         if not doc:
             logger.warning("Document %s not found; skipping", document_id)
             return
+
+        workspace = db.query(Workspace).filter(Workspace.id == doc.workspace_id).first()
+        organization_id = workspace.organization_id if workspace else None
 
         collection_name = workspace_collection_name(doc.workspace_id)
 
@@ -80,7 +84,14 @@ def process_document_sync(document_id: str) -> None:
             embeddings = generate_embeddings(chunks) if chunks else []
             vector_size = len(embeddings[0]) if embeddings else 384
             ensure_collection(collection_name, vector_size=vector_size)
-            chunk_count = index_chunks(collection_name, doc.id, chunks, embeddings) if chunks else 0
+            chunk_count = index_chunks(
+                collection_name,
+                doc.id,
+                chunks,
+                embeddings,
+                organization_id=organization_id,
+                workspace_id=doc.workspace_id,
+            ) if chunks else 0
         except RetryableProcessingError:
             raise
         except Exception as exc:  # noqa: BLE001

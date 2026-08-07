@@ -28,14 +28,20 @@ async def create_workspace(
 
 
 async def get_workspaces_by_org(db: AsyncSession, organization_id: uuid.UUID) -> list[Workspace]:
-    """Retrieve all workspaces belonging to an organization."""
-    stmt = select(Workspace).where(Workspace.organization_id == organization_id)
+    """Retrieve all non-deleted workspaces belonging to an organization."""
+    stmt = select(Workspace).where(
+        Workspace.organization_id == organization_id,
+        Workspace.deleted_at.is_(None),
+    )
     result = await db.execute(stmt)
     return list(result.scalars().all())
 
 
 async def get_workspace_by_id(db: AsyncSession, workspace_id: uuid.UUID) -> Workspace | None:
-    """Retrieve a workspace by ID."""
-    stmt = select(Workspace).where(Workspace.id == workspace_id)
+    """Retrieve a non-deleted workspace by ID."""
+    stmt = select(Workspace).where(
+        Workspace.id == workspace_id,
+        Workspace.deleted_at.is_(None),
+    )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()

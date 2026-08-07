@@ -24,12 +24,15 @@ router = APIRouter(prefix="/api/v1/analytics", tags=["Analytics"])
 
 
 async def _user_scope(db: AsyncSession, user_id) -> tuple[list, list]:
-    """Return (org_ids, workspace_ids) the user can access."""
+    """Return (org_ids, workspace_ids) the user can access (soft-deleted excluded)."""
     orgs = await org_service.get_user_organizations(db, user_id)
     org_ids = [o.id for o in orgs]
     if not org_ids:
         return [], []
-    stmt = select(Workspace.id).where(Workspace.organization_id.in_(org_ids))
+    stmt = select(Workspace.id).where(
+        Workspace.organization_id.in_(org_ids),
+        Workspace.deleted_at.is_(None),
+    )
     result = await db.execute(stmt)
     return org_ids, list(result.scalars().all())
 
@@ -57,7 +60,10 @@ async def analytics_overview(
         }
 
     # Documents
-    doc_stmt = select(Document).where(Document.workspace_id.in_(workspace_ids))
+    doc_stmt = select(Document).where(
+        Document.workspace_id.in_(workspace_ids),
+        Document.deleted_at.is_(None),
+    )
     docs = list((await db.execute(doc_stmt)).scalars().all())
     by_status: dict[str, int] = {}
     for d in docs:
@@ -81,7 +87,10 @@ async def analytics_overview(
     run_stmt = (
         select(WorkflowRun)
         .join(Workflow, Workflow.id == WorkflowRun.workflow_id)
-        .where(Workflow.workspace_id.in_(workspace_ids))
+        .where(
+            Workflow.workspace_id.in_(workspace_ids),
+            Workflow.deleted_at.is_(None),
+        )
     )
     runs = list((await db.execute(run_stmt)).scalars().all())
     run_by_status: dict[str, int] = {}
@@ -142,7 +151,10 @@ async def analytics_documents(
     base = (
         select(Document, Workspace.name)
         .join(Workspace, Workspace.id == Document.workspace_id)
-        .where(Document.workspace_id.in_(workspace_ids))
+        .where(
+            Document.workspace_id.in_(workspace_ids),
+            Document.deleted_at.is_(None),
+        )
     )
     total = (
         await db.execute(select(func.count()).select_from(base.subquery()))

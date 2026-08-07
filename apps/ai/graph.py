@@ -35,6 +35,7 @@ class AgentState(TypedDict):
     actions: list[AgentAction]
     context_chunks: list[dict]
     workspace_id: str
+    organization_id: str | None
     collection_name: str
     final_answer: str | None
     degraded: bool
@@ -72,6 +73,8 @@ def retriever_node(state: AgentState) -> dict:
         chunks = retrieve_chunks(
             query=user_msg,
             collection_name=state.get("collection_name", "ekoa_default"),
+            organization_id=state.get("organization_id"),
+            workspace_id=state.get("workspace_id"),
         )
         action_output = f"Retrieved {len(chunks)} relevant chunks from vector store"
     except Exception as e:
