@@ -134,7 +134,7 @@ temp/
 *.bin
 data/raw/
 data/processed/
-models/
+/models/
 
 # -----------------------------------------------------------------------------
 # Uploads (keep the folder, ignore user content)
