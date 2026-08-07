@@ -19,6 +19,7 @@ from apps.api.models.user import User
 from apps.api.models.workspace import Workspace
 from apps.api.models.conversation import Conversation, Message
 from apps.api.db.engine import get_db, get_engine
+from apps.api.services import audit_service
 from ekoa_config.settings import get_settings, resolve_cors_origins
 from ekoa_config.logging import setup_logging, CorrelationIdMiddleware
 from ekoa_config.rate_limit import RateLimitMiddleware
@@ -70,6 +71,7 @@ class ChatResponse(BaseModel):
     sources: list[str] = Field(default_factory=list)
     actions: list[dict] = Field(default_factory=list)
     degraded: bool = False
+    citations_unverified: bool = False
     created_at: str
 
 
@@ -189,7 +191,63 @@ def _build_initial_state(
         "organization_id": str(organization_id) if organization_id else None,
         "collection_name": workspace_collection_name(req.workspace_id) if req.workspace_id else "ekoa_default",
         "final_answer": None,
+        "guardrail_flags": [],
+        "citations": [],
+        "citations_unverified": False,
     }
+
+
+async def _record_guardrail_audits(
+    db: AsyncSession,
+    user: User,
+    conversation: Conversation,
+    workspace_id: str,
+    organization_id: uuid.UUID | None,
+    result: dict,
+) -> None:
+    """Write audit-log entries for any guardrail/citation flags on this turn.
+
+    Visibility contract (Phase 5): a guardrail that fires must be traceable in
+    the audit log, not just stdout. Each triggered input-guardrail heuristic
+    and any unverified citation produces a dedicated audit row.
+    """
+    for flag in result.get("guardrail_flags", []):
+        await audit_service.log_action(
+            db,
+            user_id=user.id,
+            action="ai.guardrail_triggered",
+            resource_type="ai_chat",
+            resource_id=conversation.id,
+            details={
+                "reason": flag.get("type"),
+                "detail": flag.get("detail"),
+                "conversation_id": str(conversation.id),
+                "workspace_id": workspace_id,
+                "organization_id": str(organization_id) if organization_id else None,
+            },
+        )
+    if result.get("citations_unverified"):
+        await audit_service.log_action(
+            db,
+            user_id=user.id,
+            action="ai.citation_unverified",
+            resource_type="ai_chat",
+            resource_id=conversation.id,
+            details={
+                "cited": result.get("citations", []),
+                "conversation_id": str(conversation.id),
+                "workspace_id": workspace_id,
+                "organization_id": str(organization_id) if organization_id else None,
+            },
+        )
+
+
+def _verified_sources(result: dict, context_chunks: list[dict]) -> list[str]:
+    """Surfaced sources: the graph's verified citations when the model made
+    explicit claims, otherwise the ids of chunks that were actually retrieved."""
+    if "citations" in result:
+        return list(result.get("citations") or [])
+    return list(set(c["document_id"] for c in context_chunks if c.get("document_id")))
 
 
 # ── REST Endpoints ───────────────────────────────────────────────────────────
@@ -261,13 +319,17 @@ async def chat_sync(
         raise
     reply = result.get("final_answer") or "No answer generated."
     await _append_message(db, conversation.id, "assistant", reply)
+    await _record_guardrail_audits(
+        db, current_user, conversation, req.workspace_id, organization_id, result
+    )
 
     return ChatResponse(
         conversation_id=str(conversation.id),
         reply=reply,
-        sources=list(set(c["document_id"] for c in result.get("context_chunks", []) if c.get("document_id"))),
+        sources=_verified_sources(result, result.get("context_chunks", [])),
         actions=[dict(a) for a in result.get("actions", [])],
         degraded=bool(result.get("degraded")),
+        citations_unverified=bool(result.get("citations_unverified")),
         created_at=_now(),
     )
 
@@ -300,6 +362,7 @@ async def chat_stream(
 
     async def event_generator():
         final_answer: str | None = None
+        final_output: dict | None = None
         try:
             async for event in graph.astream_events(state, version="v2"):
                 kind = event.get("event")
@@ -331,6 +394,7 @@ async def chat_stream(
                             }
 
                         if node_name == "synthesize":
+                            final_output = output
                             final = output.get("final_answer", "")
                             final_answer = final
                             yield {
@@ -339,7 +403,7 @@ async def chat_stream(
                             }
 
                             chunks = output.get("context_chunks", [])
-                            sources = list(set(c["document_id"] for c in chunks if isinstance(c, dict) and c.get("document_id")))
+                            sources = _verified_sources(output, chunks or [])
 
                             yield {
                                 "event": "message",
@@ -349,12 +413,21 @@ async def chat_stream(
                                     "sources": sources,
                                     "actions": [dict(a) for a in output.get("actions", [])],
                                     "degraded": bool(output.get("degraded")),
+                                    "citations_unverified": bool(output.get("citations_unverified")),
                                     "created_at": _now(),
                                 }),
                             }
         finally:
             if final_answer:
                 await _append_message(db, conversation.id, "assistant", final_answer)
+                await _record_guardrail_audits(
+                    db,
+                    current_user,
+                    conversation,
+                    req.workspace_id,
+                    organization_id,
+                    final_output or {},
+                )
 
         yield {"event": "done", "data": ""}
 

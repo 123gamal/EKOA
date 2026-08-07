@@ -102,7 +102,7 @@ def _exec_ingest(db: Session, wf: Workflow, run: WorkflowRun) -> tuple[list, lis
         for sid in ("s2", "s3", "s4"):
             steps.append({**_step_spec(wf.template_id, sid), "status": "completed", "duration_ms": 0, "output": "No documents to process", "data": {}})
         _log(logs, "warn", "No documents found in workspace - pipeline completed with no-op")
-        return steps, logs, None
+        return steps, logs, None, None
 
     # Step 2 - Text Parser Agent
     t0 = time.perf_counter()
@@ -122,7 +122,7 @@ def _exec_ingest(db: Session, wf: Workflow, run: WorkflowRun) -> tuple[list, lis
         steps.append({**_step_spec(wf.template_id, "s3"), "status": "failed", "duration_ms": 0, "output": "No parseable text - nothing to chunk", "data": {}})
         steps.append({**_step_spec(wf.template_id, "s4"), "status": "failed", "duration_ms": 0, "output": "Skipped - no chunks to index", "data": {}})
         _log(logs, "error", "No parseable text found; chunking and indexing skipped")
-        return steps, logs, "No parseable text found in workspace documents"
+        return steps, logs, "No parseable text found in workspace documents", None
 
     # Step 3 - Semantic Chunker
     t0 = time.perf_counter()
@@ -159,7 +159,7 @@ def _exec_ingest(db: Session, wf: Workflow, run: WorkflowRun) -> tuple[list, lis
     steps.append({**_step_spec(wf.template_id, "s4"), "status": "completed", "duration_ms": round((time.perf_counter() - t0) * 1000), "output": f"Upserted {indexed_points:,} points into {collection}", "data": {"points": indexed_points, "collection": collection, "failed_documents": failed_docs}})
     _log(logs, "success", f"Qdrant Vector Indexer: upserted {indexed_points:,} points into {collection}")
 
-    return steps, logs, None
+    return steps, logs, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -197,18 +197,29 @@ def _exec_compliance(db: Session, wf: Workflow, run: WorkflowRun) -> tuple[list,
     steps.append({**_step_spec(wf.template_id, "s2"), "status": "completed", "duration_ms": round((time.perf_counter() - t0) * 1000), "output": f"Identified {total_findings} potential sensitive data leak(s)", "data": findings})
     _log(logs, "info", f"PII & GDPR Detector: {findings}")
 
-    # Step 3 - Automated Compliance Check
-    # NOTE: this is an automated heuristic verdict. No human actually reviews it.
-    # TODO(Phase 4): replace with a real approval gate (human-in-the-loop queue +
-    # WebSocket/polling based decision endpoint) before claiming human review.
+    # Step 3 - Human Approval Gate
+    # Phase 5: this is now a real human-in-the-loop decision point. When the
+    # detector finds sensitive data the run PAUSES here (status AWAITING_APPROVAL,
+    # approval_status PENDING) instead of auto-computing a verdict and continuing.
+    # An admin approves or rejects via the API; nothing after this step runs
+    # until a decision is recorded.
     t0 = time.perf_counter()
-    verdict = "PASSED" if total_findings == 0 else "REVIEW_REQUIRED"
-    if verdict == "PASSED":
+    if total_findings == 0:
+        verdict = "PASSED"
         review_out = "No sensitive data found - automated check passed"
+        steps.append({**_step_spec(wf.template_id, "s3"), "status": "completed", "duration_ms": round((time.perf_counter() - t0) * 1000), "output": review_out, "data": {"verdict": verdict}})
+        _log(logs, "success", f"Human Approval Check: {verdict} - no approval required")
+        approval: dict | None = None
     else:
-        review_out = f"Found {total_findings} potential leak(s) - automated check flagged for follow-up"
-    steps.append({**_step_spec(wf.template_id, "s3"), "status": "completed", "duration_ms": round((time.perf_counter() - t0) * 1000), "output": review_out, "data": {"verdict": verdict}})
-    _log(logs, verdict == "PASSED" and "success" or "warn", f"Automated Compliance Check: {verdict}")
+        verdict = "REVIEW_REQUIRED"
+        review_out = f"Found {total_findings} potential leak(s) - awaiting human approval"
+        steps.append({**_step_spec(wf.template_id, "s3"), "status": "pending_approval", "duration_ms": round((time.perf_counter() - t0) * 1000), "output": review_out, "data": {"verdict": verdict, "findings": findings}})
+        _log(logs, "warn", f"Human Approval Check: {verdict} - run paused awaiting approval")
+        approval = {"step_id": "s3", "verdict": verdict, "findings": findings}
+
+    # Paused for a human decision: Audit Log Dispatch (s4) must NOT run.
+    if approval is not None:
+        return steps, logs, None, approval
 
     # Step 4 - Audit Log Dispatch (real audit log entry)
     t0 = time.perf_counter()
@@ -230,7 +241,7 @@ def _exec_compliance(db: Session, wf: Workflow, run: WorkflowRun) -> tuple[list,
     steps.append({**_step_spec(wf.template_id, "s4"), "status": "completed", "duration_ms": round((time.perf_counter() - t0) * 1000), "output": f"Recorded immutably in Audit Log (id {str(audit.id)[:8]})", "data": {"audit_log_id": str(audit.id)}})
     _log(logs, "success", f"Audit Log Dispatch: wrote audit_logs row {str(audit.id)[:8]}")
 
-    return steps, logs, None
+    return steps, logs, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +303,7 @@ def _exec_support(db: Session, wf: Workflow, run: WorkflowRun) -> tuple[list, li
     steps.append({**_step_spec(wf.template_id, "s4"), "status": "completed", "duration_ms": round((time.perf_counter() - t0) * 1000), "output": synth_out, "data": {"response": response, "sources": len(retrieved)}})
     _log(logs, "success", f"Response Synthesizer: {synth_out}")
 
-    return steps, logs, None
+    return steps, logs, None, None
 
 
 EXECUTORS: dict[str, callable] = {
@@ -302,44 +313,67 @@ EXECUTORS: dict[str, callable] = {
 }
 
 
+def _run_workflow_core(db: Session, run_id: str) -> None:
+    """Execute (or resume) one workflow run against real infrastructure.
+
+    Returns without a terminal status when the run pauses for human approval:
+    the run is left in AWAITING_APPROVAL with ``approval_status=PENDING`` and
+    ``completed_at`` unset. The API's approve/reject endpoints continue from
+    that state.
+    """
+    run = db.query(WorkflowRun).filter(WorkflowRun.id == uuid.UUID(run_id)).first()
+    if not run:
+        return
+    wf = db.query(Workflow).filter(Workflow.id == run.workflow_id).first()
+    if not wf:
+        return
+
+    run.status = "RUNNING"
+    run.started_at = datetime.now(timezone.utc)
+    wf.status = "RUNNING"
+    db.commit()
+
+    executor = EXECUTORS.get(wf.template_id)
+    steps: list[dict] = []
+    logs: list[dict] = []
+    error: str | None = None
+    approval: dict | None = None
+    if executor is None:
+        error = f"Unknown workflow template: {wf.template_id}"
+        _log(logs, "error", error)
+    else:
+        try:
+            steps, logs, error, approval = executor(db, wf, run)
+        except Exception as exc:  # noqa: BLE001
+            error = f"{type(exc).__name__}: {exc}"
+            _log(logs, "error", error)
+
+    run.steps = steps
+    run.logs = logs
+    if error:
+        run.status = "FAILED"
+        run.error = error
+        run.completed_at = datetime.now(timezone.utc)
+        wf.status = "FAILED"
+    elif approval:
+        # Pause for a human decision. The run is intentionally left non-terminal
+        # (no completed_at) so callers know it has not finished.
+        run.status = "AWAITING_APPROVAL"
+        run.approval_status = "PENDING"
+        run.approval_step_id = approval.get("step_id")
+        run.approved_by = None
+        run.approved_at = None
+        run.approval_reason = None
+        wf.status = "AWAITING_APPROVAL"
+    else:
+        run.status = "COMPLETED"
+        run.completed_at = datetime.now(timezone.utc)
+        wf.status = "COMPLETED"
+    db.commit()
+
+
 def run_workflow_sync(run_id: str) -> None:
     """Execute a workflow run end-to-end against real infrastructure."""
     engine = get_sync_engine()
     with Session(engine) as db:
-        run = db.query(WorkflowRun).filter(WorkflowRun.id == uuid.UUID(run_id)).first()
-        if not run:
-            return
-        wf = db.query(Workflow).filter(Workflow.id == run.workflow_id).first()
-        if not wf:
-            return
-
-        run.status = "RUNNING"
-        run.started_at = datetime.now(timezone.utc)
-        wf.status = "RUNNING"
-        db.commit()
-
-        executor = EXECUTORS.get(wf.template_id)
-        steps: list[dict] = []
-        logs: list[dict] = []
-        error: str | None = None
-        if executor is None:
-            error = f"Unknown workflow template: {wf.template_id}"
-            _log(logs, "error", error)
-        else:
-            try:
-                steps, logs, error = executor(db, wf, run)
-            except Exception as exc:  # noqa: BLE001
-                error = f"{type(exc).__name__}: {exc}"
-                _log(logs, "error", error)
-
-        run.steps = steps
-        run.logs = logs
-        run.completed_at = datetime.now(timezone.utc)
-        if error:
-            run.status = "FAILED"
-            run.error = error
-            wf.status = "FAILED"
-        else:
-            run.status = "COMPLETED"
-            wf.status = "COMPLETED"
-        db.commit()
+        _run_workflow_core(db, run_id)

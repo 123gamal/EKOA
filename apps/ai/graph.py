@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -39,6 +40,9 @@ class AgentState(TypedDict):
     collection_name: str
     final_answer: str | None
     degraded: bool
+    guardrail_flags: list[dict]
+    citations: list[str]
+    citations_unverified: bool
 
 
 # ── Agent Node Implementations ───────────────────────────────────────────────
@@ -48,9 +52,96 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# ── Input guardrails (heuristic) ─────────────────────────────────────────────
+
+
+# Instruction-override / prompt-injection phrases. These are deliberately
+# simple substring patterns; see check_input_guardrails for the honest caveat.
+INSTRUCTION_OVERRIDE_PATTERNS: list[str] = [
+    r"ignore (all |the )?(previous|prior|above|earlier) (instructions?|prompts?|messages|context|system)",
+    r"disregard (all |the )?(previous|prior|above|earlier) (instructions?|prompts?|messages|context|system)",
+    r"forget (all |your |the )?(instructions?|prompts?|context|guidelines|rules)",
+    r"you are now (unfiltered|uncensored|jailbroken|a? ?dan)",
+    r"act as (an? )?(unfiltered|uncensored|jailbroken|dan)",
+    r"reveal (your|the) (system prompt|system instructions|inner prompt|hidden prompt)",
+    r"(show|print|leak|expose|give me) (your|the) (system|initial|base) prompt",
+    r"do not follow (your|the|any) (instructions|prompt|rules)",
+    r"override (your |the )?(instructions|prompt|rules)",
+    r"jailbreak",
+    r"you('re| are) free(d)? from (all )?(rules|constraints|instructions)",
+]
+
+# Suspiciously long input: ordinary chat messages are short; anything past this
+# is out of distribution and worth flagging.
+MAX_MESSAGE_LEN = 4000
+# A run of non-alphanumeric characters longer than this is anomalous.
+SPECIAL_CHAR_RUN_LEN = 12
+
+
+def check_input_guardrails(text: str) -> list[dict]:
+    """Heuristic prompt-injection / abuse checks on an incoming user message.
+
+    Returns a list of flag dicts (empty when the message looks clean).
+
+    Honest assessment of coverage:
+    - Catches obvious instruction-override phrasing ("ignore previous
+      instructions", "reveal your system prompt", "jailbreak", ...), long
+      runs of special characters, and abnormally long inputs.
+    - Will NOT catch novel obfuscated injections, encodings, or subtle
+      social-engineering that avoids these literal patterns. This is a cheap
+      first-pass tripwire for investigation, NOT a security boundary.
+    """
+    if not text:
+        return []
+    lowered = text.lower()
+    flags: list[dict] = []
+
+    for pattern in INSTRUCTION_OVERRIDE_PATTERNS:
+        if re.search(pattern, lowered):
+            flags.append({"type": "instruction_override", "detail": f"matched pattern: {pattern}"})
+            break
+
+    longest_run = 0
+    for run in re.finditer(r"[^\w\s]+", text):
+        longest_run = max(longest_run, len(run.group()))
+    if longest_run > SPECIAL_CHAR_RUN_LEN:
+        flags.append({
+            "type": "excessive_special_characters",
+            "detail": f"special-character run of length {longest_run}",
+        })
+
+    if len(text) > MAX_MESSAGE_LEN:
+        flags.append({
+            "type": "excessive_length",
+            "detail": f"message length {len(text)} exceeds {MAX_MESSAGE_LEN}",
+        })
+
+    return flags
+
+
 def coordinator_node(state: AgentState) -> dict:
-    """Route the user's message and build a final response."""
+    """Route the user's message, applying input guardrails first.
+
+    Guardrails are flag-and-continue for this phase: a flagged message is
+    logged (structured) and carried in state so downstream visibility (audit
+    log) can record it, but it is not blocked outright. Blocking on heuristics
+    would produce false positives on legitimate long/technical messages.
+    """
     user_msg = state["messages"][-1]["content"] if state["messages"] else ""
+
+    flags = check_input_guardrails(user_msg)
+    if flags:
+        for flag in flags:
+            logger.warning(
+                "ai.guardrail_triggered",
+                extra={
+                    "reason": flag["type"],
+                    "detail": flag.get("detail"),
+                    "workspace_id": state.get("workspace_id"),
+                    "organization_id": state.get("organization_id"),
+                    "message_preview": user_msg[:120],
+                },
+            )
 
     action: AgentAction = {
         "tool_name": "coordinator.analyze",
@@ -60,6 +151,7 @@ def coordinator_node(state: AgentState) -> dict:
     }
 
     return {
+        "guardrail_flags": flags,
         "actions": state["actions"] + [action],
     }
 
@@ -118,8 +210,8 @@ def document_node(state: AgentState) -> dict:
 def _call_llm(messages: list[dict[str, str]], context: str | None = None) -> tuple[str, bool]:
     """Call the configured LLM provider (deepseek or gemini) with messages and optional context.
 
-    Returns (answer, degraded). ``degraded`` is True only when no real LLM provider
-    answered and the local fallback template was used instead.
+    Returns (answer, degraded). ``degraded`` is True only when no real LLM
+    provider answered and the local fallback template was used instead.
 
     Emits structured telemetry per call: provider, latency in ms, and token
     counts when the provider SDK reports them (omitted as null otherwise).
@@ -139,9 +231,15 @@ def _call_llm(messages: list[dict[str, str]], context: str | None = None) -> tup
             system_content = "You are EKOA (Enterprise Knowledge Operations Assistant), an expert AI assistant."
             if context:
                 system_content += f"\n\nBase your answer on the following retrieved knowledge base context:\n{context[:10000]}"
+                system_content += (
+                    "\n\nAt the end of your answer include a single line formatted exactly as: "
+                    "CITATIONS: [<document_id>, <document_id>] listing ONLY the document IDs of the "
+                    "sources you actually used from the context above. If you used no sources, write "
+                    "CITATIONS: []."
+                )
             else:
                 system_content += "\n\nAnswer the user's query clearly and concisely."
-            
+
             full_messages = [{"role": "system", "content": system_content}] + [
                 {"role": m["role"], "content": m["content"]} for m in messages if m.get("content")
             ]
@@ -183,6 +281,12 @@ def _call_llm(messages: list[dict[str, str]], context: str | None = None) -> tup
             prompt = "You are EKOA (Enterprise Knowledge Operations Assistant)."
             if context:
                 prompt += f"\n\nContext:\n{context[:10000]}"
+                prompt += (
+                    "\n\nAt the end of your answer include a single line formatted exactly as: "
+                    "CITATIONS: [<document_id>, <document_id>] listing ONLY the document IDs of the "
+                    "sources you actually used from the context above. If you used no sources, write "
+                    "CITATIONS: []."
+                )
             prompt += f"\n\nUser Question: {user_msg}"
             resp = model.generate_content(prompt)
             elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
@@ -242,17 +346,87 @@ def _fallback_answer(messages: list[dict], context: str | None) -> str:
     )
 
 
+# ── Citation integrity check ─────────────────────────────────────────────────
+
+_CITATIONS_RE = re.compile(r"CITATIONS:\s*\[([^\]]*)\]", re.IGNORECASE)
+_UUID_RE = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+
+def _extract_citations(answer: str) -> list[str]:
+    """Pull the document IDs the model explicitly claimed to cite.
+
+    The model is instructed to close its answer with a ``CITATIONS: [..]``
+    line; this parses that line. Returns [] when no explicit claims were made
+    (in which case nothing is being asserted, so there is nothing to verify).
+    """
+    if not answer:
+        return []
+    match = _CITATIONS_RE.search(answer)
+    if not match:
+        return []
+    tokens = _UUID_RE.findall(match.group(1))
+    return list(dict.fromkeys(tokens))
+
+
+def _strip_citation_line(answer: str) -> str:
+    """Remove the machine-readable citations line before the answer is shown."""
+    stripped = _CITATIONS_RE.sub("", answer)
+    return stripped.replace("\n\n\n", "\n\n").strip()
+
+
+def validate_citations(citations: list[str], context_chunks: list[dict]) -> tuple[list[str], list[str]]:
+    """Cross-check model-cited document IDs against chunks actually retrieved.
+
+    Returns ``(verified, dropped)``. A citation is verified only when its
+    document ID appears in the payload of a chunk that was really retrieved
+    for this query. This is a deterministic integrity check — not a heuristic.
+    """
+    retrieved = {c.get("document_id") for c in context_chunks if c.get("document_id")}
+    verified = [c for c in citations if c in retrieved]
+    dropped = [c for c in citations if c not in retrieved]
+    return verified, dropped
+
+
 def synthesize_node(state: AgentState) -> dict:
     """Synthesize the final answer from all agent outputs and context."""
     chunks = state.get("context_chunks", [])
 
     context = None
-    citations = []
     if chunks:
         context = "\n\n".join(c["text"] for c in chunks if c.get("text"))
-        citations = list(set(c["document_id"] for c in chunks if c.get("document_id")))
 
     answer, degraded = _call_llm(state["messages"], context)
+
+    # Citation integrity: verify the model's cited document IDs against the
+    # chunks actually retrieved for this query before anything is sent back.
+    cited = _extract_citations(answer)
+    if cited:
+        verified, dropped = validate_citations(cited, chunks)
+        citations = verified
+        citations_unverified = bool(dropped)
+        if dropped:
+            logger.warning(
+                "ai.citation_unverified",
+                extra={
+                    "cited": cited,
+                    "dropped": dropped,
+                    "retrieved_ids": sorted(
+                        {c.get("document_id") for c in chunks if c.get("document_id")}
+                    ),
+                    "workspace_id": state.get("workspace_id"),
+                    "organization_id": state.get("organization_id"),
+                },
+            )
+    else:
+        # No explicit citation claims: fall back to the ids of chunks that were
+        # actually retrieved. These are verified by construction, so no flag.
+        citations = list(
+            dict.fromkeys(c.get("document_id") for c in chunks if c.get("document_id"))
+        )
+        citations_unverified = False
+    answer = _strip_citation_line(answer)
 
     action: AgentAction = {
         "tool_name": "coordinator.synthesize",
@@ -264,6 +438,8 @@ def synthesize_node(state: AgentState) -> dict:
     return {
         "final_answer": answer,
         "degraded": degraded,
+        "citations": citations,
+        "citations_unverified": citations_unverified,
         "actions": state["actions"] + [action],
     }
 

@@ -44,6 +44,11 @@ class WorkflowRunResponse(BaseModel):
     error: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    approval_status: str | None = None
+    approval_step_id: str | None = None
+    approved_by: UUID | None = None
+    approved_at: datetime | None = None
+    approval_reason: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -55,7 +60,7 @@ class WorkflowStepSpec(BaseModel):
 
     id: str
     name: str
-    type: str  # trigger | agent | vector_db | automated_compliance_check | action
+    type: str  # trigger | agent | vector_db | human_approval | action
 
 
 class WorkflowTemplate(BaseModel):
@@ -72,3 +77,9 @@ class WorkflowRunRequest(BaseModel):
     """Payload for triggering a workflow run."""
 
     query: str | None = None
+
+
+class WorkflowApprovalRequest(BaseModel):
+    """Payload for an admin's approve/reject decision on a paused run."""
+
+    reason: str | None = Field(default=None, max_length=1000)

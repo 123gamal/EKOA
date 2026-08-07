@@ -28,13 +28,14 @@ WORKFLOW_TEMPLATES: list[dict] = [
         "title": "Regulatory Compliance & Security Audit",
         "description": (
             "Scan contracts and policy documents against enterprise GDPR and "
-            "PII compliance rules and record the outcome in the audit log."
+            "PII compliance rules; when sensitive data is found, pause for a "
+            "human approval gate before recording the outcome in the audit log."
         ),
         "category": "Compliance",
         "steps": [
             {"id": "s1", "name": "Policy Ingestion", "type": "trigger"},
             {"id": "s2", "name": "PII & GDPR Detector", "type": "agent"},
-            {"id": "s3", "name": "Automated Compliance Check", "type": "automated_compliance_check"},
+            {"id": "s3", "name": "Human Approval", "type": "human_approval"},
             {"id": "s4", "name": "Audit Log Dispatch", "type": "action"},
         ],
     },

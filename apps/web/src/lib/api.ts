@@ -76,7 +76,7 @@ export interface Workflow {
   name: string;
   description?: string | null;
   template_id: string;
-  status: "DRAFT" | "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
+  status: "DRAFT" | "PENDING" | "RUNNING" | "AWAITING_APPROVAL" | "COMPLETED" | "FAILED" | "REJECTED";
   workspace_id: string;
   created_by: string;
   created_at: string;
@@ -87,7 +87,7 @@ export interface WorkflowStepResult {
   id: string;
   name: string;
   type: string;
-  status: "idle" | "running" | "completed" | "failed";
+  status: "idle" | "running" | "completed" | "failed" | "pending_approval" | "approved" | "rejected";
   output: string;
   duration_ms?: number;
   data?: Record<string, unknown>;
@@ -96,12 +96,17 @@ export interface WorkflowStepResult {
 export interface WorkflowRun {
   id: string;
   workflow_id: string;
-  status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
+  status: "PENDING" | "RUNNING" | "AWAITING_APPROVAL" | "COMPLETED" | "FAILED" | "REJECTED";
   steps: WorkflowStepResult[] | null;
   logs: { ts: string; level: string; message: string }[] | null;
   error?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
+  approval_status?: string | null;
+  approval_step_id?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  approval_reason?: string | null;
   created_at: string;
 }
 
@@ -326,6 +331,22 @@ export const workflowApi = {
   async listRuns(workflowId: string, page = 1, pageSize = 25): Promise<Paginated<WorkflowRun>> {
     const res = await apiFetch(`/workflows/${workflowId}/runs?page=${page}&page_size=${pageSize}`);
     if (!res.ok) throw new Error("Failed to list workflow runs");
+    return res.json();
+  },
+  async approveRun(workflowId: string, runId: string, reason?: string): Promise<WorkflowRun> {
+    const res = await apiFetch(`/workflows/${workflowId}/runs/${runId}/approve`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || "Failed to approve workflow run");
+    return res.json();
+  },
+  async rejectRun(workflowId: string, runId: string, reason?: string): Promise<WorkflowRun> {
+    const res = await apiFetch(`/workflows/${workflowId}/runs/${runId}/reject`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || "Failed to reject workflow run");
     return res.json();
   },
 };

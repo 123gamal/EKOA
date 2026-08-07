@@ -40,7 +40,7 @@ const STEP_ICONS: Record<string, React.ReactNode> = {
   trigger: <Zap className="h-4 w-4 text-amber-500" />,
   agent: <Cpu className="h-4 w-4 text-blue-500" />,
   vector_db: <Database className="h-4 w-4 text-purple-500" />,
-  automated_compliance_check: <UserCheck className="h-4 w-4 text-emerald-500" />,
+  human_approval: <UserCheck className="h-4 w-4 text-emerald-500" />,
   action: <ShieldCheck className="h-4 w-4 text-indigo-500" />,
 };
 
@@ -50,11 +50,14 @@ function statusBadge(status: string) {
     case "INDEXED":
       return <Badge variant="success">{status}</Badge>;
     case "FAILED":
+    case "REJECTED":
       return <Badge variant="error">{status}</Badge>;
     case "RUNNING":
     case "PROCESSING":
     case "PENDING":
       return <Badge variant="warning">{status}</Badge>;
+    case "AWAITING_APPROVAL":
+      return <Badge variant="info">{status}</Badge>;
     default:
       return <Badge variant="default">{status}</Badge>;
   }
@@ -86,6 +89,7 @@ export default function WorkflowsPage() {
   const [activeWorkflow, setActiveWorkflow] = useState<Workflow | null>(null);
   const [runHistory, setRunHistory] = useState<WorkflowRun[]>([]);
   const [polling, setPolling] = useState(false);
+  const [decisionReason, setDecisionReason] = useState("");
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Bootstrap: orgs -> workspaces
@@ -177,7 +181,13 @@ export default function WorkflowsPage() {
         setRunHistory(latest.items);
         if (latest.items.length > 0) setActiveRun(latest.items[0]);
         const newest = latest.items[0];
-        if (newest && (newest.status === "COMPLETED" || newest.status === "FAILED")) {
+        if (
+          newest &&
+          (newest.status === "COMPLETED" ||
+            newest.status === "FAILED" ||
+            newest.status === "REJECTED" ||
+            newest.status === "AWAITING_APPROVAL")
+        ) {
           if (pollTimer.current) clearInterval(pollTimer.current);
           setPolling(false);
         }
@@ -237,6 +247,34 @@ export default function WorkflowsPage() {
     if (wf) setActiveWorkflow(wf);
   }
 
+  async function handleApprove() {
+    if (!activeRun || !activeWorkflow) return;
+    setError("");
+    try {
+      const updated = await workflowApi.approveRun(activeWorkflow.id, activeRun.id, decisionReason || undefined);
+      setActiveRun(updated);
+      setRunHistory((prev) => [updated, ...prev.filter((r) => r.id !== updated.id)]);
+      setDecisionReason("");
+      await loadLatestRun(activeWorkflow.id);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to approve run");
+    }
+  }
+
+  async function handleReject() {
+    if (!activeRun || !activeWorkflow) return;
+    setError("");
+    try {
+      const updated = await workflowApi.rejectRun(activeWorkflow.id, activeRun.id, decisionReason || undefined);
+      setActiveRun(updated);
+      setRunHistory((prev) => [updated, ...prev.filter((r) => r.id !== updated.id)]);
+      setDecisionReason("");
+      await loadLatestRun(activeWorkflow.id);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to reject run");
+    }
+  }
+
   if (loadingWs) {
     return (
       <div className="flex items-center justify-center py-24">
@@ -270,10 +308,12 @@ export default function WorkflowsPage() {
         className={`rounded-xl border p-4 transition ${
           step.status === "running"
             ? "border-[var(--primary)] bg-[var(--primary)]/10 ring-2 ring-[var(--primary)]/30"
-            : step.status === "completed"
+            : step.status === "completed" || step.status === "approved"
             ? "border-emerald-500/40 bg-emerald-500/5"
-            : step.status === "failed"
+            : step.status === "failed" || step.status === "rejected"
             ? "border-red-500/50 bg-red-500/5"
+            : step.status === "pending_approval"
+            ? "border-amber-500/50 bg-amber-500/5 ring-2 ring-amber-500/20"
             : "border-[var(--border)] bg-[var(--card)]"
         }`}
       >
@@ -298,7 +338,7 @@ export default function WorkflowsPage() {
     </div>
   );
 
-  const stepStatus = (s: WorkflowStepResult): "idle" | "running" | "completed" | "failed" =>
+  const stepStatus = (s: WorkflowStepResult): "idle" | "running" | "completed" | "failed" | "pending_approval" | "approved" | "rejected" =>
     s.status || "idle";
 
   return (
@@ -599,6 +639,37 @@ export default function WorkflowsPage() {
                 ))}
               </div>
             </div>
+
+            {activeRun.status === "AWAITING_APPROVAL" && activeRun.approval_status === "PENDING" && (
+              <div className="rounded-xl border border-amber-500/50 bg-amber-500/5 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <UserCheck className="h-5 w-5 text-amber-500" />
+                  <h3 className="font-semibold text-sm">Run paused — awaiting human approval</h3>
+                  <span className="ml-auto text-[11px] uppercase text-amber-500">Decision required</span>
+                </div>
+                <p className="text-xs text-[var(--muted-foreground)] mb-3">
+                  Sensitive data was detected. Approving resumes the run and records the compliance
+                  result in the audit log; rejecting terminates it.
+                </p>
+                <Input
+                  label="Reason / comment (optional)"
+                  id="decision-reason"
+                  value={decisionReason}
+                  onChange={(e) => setDecisionReason(e.target.value)}
+                  placeholder="e.g. Reviewed the finding — no true leak"
+                />
+                <div className="flex gap-2 pt-3">
+                  <Button size="sm" onClick={handleApprove}>
+                    <CheckCircle2 className="h-4 w-4" />
+                    Approve
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={handleReject}>
+                    <X className="h-4 w-4" />
+                    Reject
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {activeRun.status === "FAILED" && activeRun.error && (
               <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
