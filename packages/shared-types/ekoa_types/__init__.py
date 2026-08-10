@@ -2,6 +2,15 @@
 
 from ekoa_types.auth import LoginRequest, RegisterRequest, TokenPair
 from ekoa_types.chat import AgentAction, ChatMessage, ChatRequest, ChatResponse
+from ekoa_types.connector import (
+    ConnectorConnectRequest,
+    ConnectorHealthResponse,
+    ConnectorLastSyncStatus,
+    ConnectorResponse,
+    ConnectorStatus,
+    ConnectorSyncResponse,
+    GitHubConfig,
+)
 from ekoa_types.conversation import ConversationResponse, MessageResponse
 from ekoa_types.document import (
     DocumentBase,
@@ -41,6 +50,14 @@ __all__ = [
     "ChatMessage",
     "ChatRequest",
     "ChatResponse",
+    # connector
+    "ConnectorConnectRequest",
+    "ConnectorHealthResponse",
+    "ConnectorLastSyncStatus",
+    "ConnectorResponse",
+    "ConnectorStatus",
+    "ConnectorSyncResponse",
+    "GitHubConfig",
     # conversation
     "ConversationResponse",
     "MessageResponse",

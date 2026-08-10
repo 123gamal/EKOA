@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   GitBranch,
   Play,
@@ -18,23 +19,22 @@ import {
   FolderOpen,
   Loader2,
   TerminalSquare,
-  X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { Input } from "@/components/ui/Input";
+import { Dialog } from "@/components/ui/Dialog";
+import { ApprovalPanel } from "@/components/workflows/ApprovalPanel";
+import { WorkflowCreateForm } from "@/components/workflows/WorkflowCreateForm";
 import {
   orgApi,
   workspaceApi,
   workflowApi,
-  type Organization,
-  type Workspace,
   type Workflow,
-  type WorkflowRun,
   type WorkflowStepResult,
   type WorkflowTemplate,
 } from "@/lib/api";
+import type { CreateWorkflowValues } from "@/lib/validation";
 
 const STEP_ICONS: Record<string, React.ReactNode> = {
   trigger: <Zap className="h-4 w-4 text-amber-500" />,
@@ -63,219 +63,139 @@ function statusBadge(status: string) {
   }
 }
 
+const TERMINAL_RUN_STATUSES = new Set(["COMPLETED", "FAILED", "REJECTED"]);
+const RUN_POLL_MS = 2000;
+
 export default function WorkflowsPage() {
-  const [orgs, setOrgs] = useState<Organization[]>([]);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [selectedWs, setSelectedWs] = useState<string>("");
-  const [loadingWs, setLoadingWs] = useState(true);
+  const queryClient = useQueryClient();
 
-  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [wfTotal, setWfTotal] = useState(0);
-  const [wfPage, setWfPage] = useState(1);
-  const [loadingWorkflows, setLoadingWorkflows] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-
-  // Create & run dialog
+  const [selectedWs, setSelectedWs] = useState("");
+  const [selectedWfId, setSelectedWfId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [creatingTemplate, setCreatingTemplate] = useState<WorkflowTemplate | null>(null);
-  const [wfName, setWfName] = useState("");
-  const [wfDesc, setWfDesc] = useState("");
   const [wfQuery, setWfQuery] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // Active run visualization
-  const [activeRun, setActiveRun] = useState<WorkflowRun | null>(null);
-  const [activeWorkflow, setActiveWorkflow] = useState<Workflow | null>(null);
-  const [runHistory, setRunHistory] = useState<WorkflowRun[]>([]);
-  const [polling, setPolling] = useState(false);
-  const [decisionReason, setDecisionReason] = useState("");
-  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-
   // Bootstrap: orgs -> workspaces
-  useEffect(() => {
-    orgApi
-      .list()
-      .then((data) => {
-        setOrgs(data.items);
-        if (data.items.length > 0) {
-          return workspaceApi.list(data.items[0].id);
-        }
-        return Promise.resolve({
-          items: [] as Workspace[],
-          total: 0,
-          page: 1,
-          page_size: 25,
-          pages: 0,
-        });
-      })
-      .then((wss) => {
-        setWorkspaces(wss.items);
-        if (wss.items.length > 0) setSelectedWs(wss.items[0].id);
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoadingWs(false));
-  }, []);
+  const orgsQuery = useQuery({
+    queryKey: ["orgs"],
+    queryFn: () => orgApi.list(),
+  });
+  const orgs = orgsQuery.data?.items ?? [];
 
-  // Load templates once
-  useEffect(() => {
-    workflowApi.listTemplates().then(setTemplates).catch((e) => setError(e.message));
-  }, []);
+  const workspacesQuery = useQuery({
+    queryKey: ["workspaces", orgs[0]?.id ?? "none"],
+    queryFn: () => workspaceApi.list(orgs[0].id),
+    enabled: orgs.length > 0,
+  });
+  const workspaces = workspacesQuery.data?.items ?? [];
 
-  // Load workflows when workspace changes
-  useEffect(() => {
-    if (!selectedWs) return;
-    setLoadingWorkflows(true);
-    workflowApi
-      .list(selectedWs)
-      .then((data) => {
-        setWorkflows(data.items);
-        setWfTotal(data.total);
-        setWfPage(data.page);
-        if (data.items.length > 0) {
-          setActiveWorkflow(data.items[0]);
-          loadLatestRun(data.items[0].id);
-        }
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoadingWorkflows(false));
-  }, [selectedWs]);
+  // Templates load once
+  const templatesQuery = useQuery({
+    queryKey: ["workflow-templates"],
+    queryFn: () => workflowApi.listTemplates(),
+  });
+  const templates = templatesQuery.data ?? [];
 
-  async function loadMoreWorkflows() {
-    if (loadingMore || !selectedWs) return;
-    setLoadingMore(true);
-    try {
-      const data = await workflowApi.list(selectedWs, wfPage + 1);
-      setWorkflows((prev) => [...prev, ...data.items]);
-      setWfTotal(data.total);
-      setWfPage(data.page);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load more workflows");
-    } finally {
-      setLoadingMore(false);
-    }
-  }
+  // Workflows for the selected workspace
+  const workflowsQuery = useQuery({
+    queryKey: ["workflows", selectedWs],
+    queryFn: () => workflowApi.list(selectedWs),
+    enabled: !!selectedWs,
+  });
+  const workflows = workflowsQuery.data?.items ?? [];
+  const wfTotal = workflowsQuery.data?.total ?? 0;
 
-  // Poll active run while it is pending/running
-  useEffect(() => {
-    return () => {
-      if (pollTimer.current) clearInterval(pollTimer.current);
-    };
-  }, []);
+  // Active run polling — the run query refreshes on RUN_POLL_MS while the
+  // newest run is still in flight, and stops once it reaches a terminal state.
+  const runsQuery = useQuery({
+    queryKey: ["workflow-runs", selectedWfId ?? "none"],
+    queryFn: () => workflowApi.listRuns(selectedWfId!),
+    enabled: !!selectedWfId,
+    refetchInterval: (query) => {
+      const newest = query.state.data?.items?.[0];
+      if (!newest) return false;
+      return TERMINAL_RUN_STATUSES.has(newest.status) ? false : RUN_POLL_MS;
+    },
+  });
+  const runHistory = runsQuery.data?.items ?? [];
+  const activeRun = useMemo(
+    () =>
+      runHistory.find((r) => r.id === selectedRunId) ??
+      runHistory[0] ??
+      null,
+    [runHistory, selectedRunId]
+  );
+  const activeWorkflow = useMemo(
+    () => (selectedWfId ? (workflows.find((w) => w.id === selectedWfId) ?? null) : null),
+    [workflows, selectedWfId]
+  );
 
-  async function loadLatestRun(workflowId: string) {
-    try {
-      const runs = await workflowApi.listRuns(workflowId);
-      setRunHistory(runs.items);
-      if (runs.items.length > 0) setActiveRun(runs.items[0]);
-    } catch {
-      // ignore
-    }
-  }
-
-  function startPolling(run: WorkflowRun) {
-    if (pollTimer.current) clearInterval(pollTimer.current);
-    pollTimer.current = setInterval(async () => {
-      try {
-        const latest = await workflowApi.listRuns(run.workflow_id);
-        setRunHistory(latest.items);
-        if (latest.items.length > 0) setActiveRun(latest.items[0]);
-        const newest = latest.items[0];
-        if (
-          newest &&
-          (newest.status === "COMPLETED" ||
-            newest.status === "FAILED" ||
-            newest.status === "REJECTED" ||
-            newest.status === "AWAITING_APPROVAL")
-        ) {
-          if (pollTimer.current) clearInterval(pollTimer.current);
-          setPolling(false);
-        }
-      } catch {
-        if (pollTimer.current) clearInterval(pollTimer.current);
-        setPolling(false);
-      }
-    }, 2000);
-    setPolling(true);
-  }
-
-  async function handleCreateAndRun(e: FormEvent) {
-    e.preventDefault();
-    if (!creatingTemplate || !selectedWs) return;
-    setSubmitting(true);
-    setError("");
-    try {
+  const createAndRunMutation = useMutation({
+    mutationFn: async (values: CreateWorkflowValues & { template: WorkflowTemplate }) => {
       const wf = await workflowApi.create({
-        name: wfName || creatingTemplate.title,
-        description: wfDesc || creatingTemplate.description,
-        template_id: creatingTemplate.id,
+        name: values.name,
+        description: values.description || undefined,
+        template_id: values.template.id,
         workspace_id: selectedWs,
       });
-      const run = await workflowApi.run(wf.id, creatingTemplate.id === "support-router" ? wfQuery : undefined);
-      setWorkflows((prev) => [wf, ...prev.filter((w) => w.id !== wf.id)]);
-      setActiveWorkflow(wf);
-      setActiveRun(run);
-      setRunHistory((prev) => [run, ...prev]);
+      const run = await workflowApi.run(
+        wf.id,
+        values.template.id === "support-router" ? values.query : undefined
+      );
+      return { wf, run };
+    },
+    onSuccess: ({ wf, run }) => {
+      setSelectedWfId(wf.id);
+      setSelectedRunId(run.id);
       setCreatingTemplate(null);
-      setWfName("");
-      setWfDesc("");
       setWfQuery("");
-      startPolling(run);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to create workflow");
-    } finally {
-      setSubmitting(false);
+      queryClient.invalidateQueries({ queryKey: ["workflows", selectedWs] });
+      queryClient.invalidateQueries({ queryKey: ["workflow-runs", wf.id] });
+    },
+    onError: (e: unknown) => {
+      setError(e instanceof Error ? e.message : "Failed to create workflow");
+    },
+  });
+
+  const runExistingMutation = useMutation({
+    mutationFn: (wf: Workflow) =>
+      workflowApi.run(wf.id, wf.template_id === "support-router" ? wfQuery : undefined),
+    onSuccess: (run) => {
+      setSelectedWfId(run.workflow_id);
+      setSelectedRunId(run.id);
+      queryClient.invalidateQueries({ queryKey: ["workflow-runs", run.workflow_id] });
+    },
+    onError: (e: unknown) => {
+      setError(e instanceof Error ? e.message : "Failed to run workflow");
+    },
+  });
+
+  const decideMutation = useMutation({
+    mutationFn: ({ action, reason }: { action: "approve" | "reject"; reason?: string }) => {
+      if (!activeWorkflow || !activeRun) throw new Error("No active run");
+      return action === "approve"
+        ? workflowApi.approveRun(activeWorkflow.id, activeRun.id, reason)
+        : workflowApi.rejectRun(activeWorkflow.id, activeRun.id, reason);
+    },
+    onSuccess: (updated) => {
+      setSelectedRunId(updated.id);
+      setSelectedWfId(updated.workflow_id);
+      queryClient.invalidateQueries({ queryKey: ["workflow-runs", updated.workflow_id] });
+    },
+    onError: (e: unknown) => {
+      setError(e instanceof Error ? e.message : "Failed to record decision");
+    },
+  });
+
+  // Auto-select the first workspace once orgs/workspaces have loaded.
+  useEffect(() => {
+    if (selectedWs === "" && workspaces.length > 0) {
+      setSelectedWs(workspaces[0].id);
     }
-  }
+  }, [selectedWs, workspaces]);
 
-  async function handleRunExisting(wf: Workflow) {
-    setError("");
-    setActiveWorkflow(wf);
-    try {
-      const run = await workflowApi.run(wf.id, wf.template_id === "support-router" ? wfQuery : undefined);
-      setActiveRun(run);
-      setRunHistory((prev) => [run, ...prev]);
-      startPolling(run);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to run workflow");
-    }
-  }
-
-  function selectRun(run: WorkflowRun) {
-    setActiveRun(run);
-    const wf = workflows.find((w) => w.id === run.workflow_id);
-    if (wf) setActiveWorkflow(wf);
-  }
-
-  async function handleApprove() {
-    if (!activeRun || !activeWorkflow) return;
-    setError("");
-    try {
-      const updated = await workflowApi.approveRun(activeWorkflow.id, activeRun.id, decisionReason || undefined);
-      setActiveRun(updated);
-      setRunHistory((prev) => [updated, ...prev.filter((r) => r.id !== updated.id)]);
-      setDecisionReason("");
-      await loadLatestRun(activeWorkflow.id);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to approve run");
-    }
-  }
-
-  async function handleReject() {
-    if (!activeRun || !activeWorkflow) return;
-    setError("");
-    try {
-      const updated = await workflowApi.rejectRun(activeWorkflow.id, activeRun.id, decisionReason || undefined);
-      setActiveRun(updated);
-      setRunHistory((prev) => [updated, ...prev.filter((r) => r.id !== updated.id)]);
-      setDecisionReason("");
-      await loadLatestRun(activeWorkflow.id);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to reject run");
-    }
-  }
-
-  if (loadingWs) {
+  if (workspacesQuery.isLoading || (orgs.length > 0 && selectedWs === "")) {
     return (
       <div className="flex items-center justify-center py-24">
         <p className="text-[var(--muted-foreground)]">Loading workspaces...</p>
@@ -355,7 +275,11 @@ export default function WorkflowsPage() {
         </div>
         <select
           value={selectedWs}
-          onChange={(e) => setSelectedWs(e.target.value)}
+          onChange={(e) => {
+            setSelectedWs(e.target.value);
+            setSelectedWfId(null);
+            setSelectedRunId(null);
+          }}
           className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm"
         >
           {workspaces.map((ws) => (
@@ -367,7 +291,10 @@ export default function WorkflowsPage() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400"
+        >
           {error}
         </div>
       )}
@@ -408,9 +335,6 @@ export default function WorkflowsPage() {
                   size="sm"
                   onClick={() => {
                     setCreatingTemplate(tmpl);
-                    setWfName(tmpl.title);
-                    setWfDesc("");
-                    setWfQuery("");
                     setError("");
                   }}
                 >
@@ -425,62 +349,26 @@ export default function WorkflowsPage() {
 
       {/* Create & Run dialog */}
       {creatingTemplate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold">Create & Run Workflow</h2>
-                <button
-                  className="rounded p-1 hover:bg-[var(--muted)]"
-                  onClick={() => setCreatingTemplate(null)}
-                  aria-label="Close"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleCreateAndRun} className="space-y-4">
-                <p className="text-xs text-[var(--muted-foreground)]">{creatingTemplate.description}</p>
-                <Input label="Workflow Name" id="wf-name" value={wfName} onChange={(e) => setWfName(e.target.value)} required />
-                <Input label="Description (optional)" id="wf-desc" value={wfDesc} onChange={(e) => setWfDesc(e.target.value)} />
-                {creatingTemplate.id === "support-router" && (
-                  <Input
-                    label="Sample Support Query"
-                    id="wf-query"
-                    value={wfQuery}
-                    onChange={(e) => setWfQuery(e.target.value)}
-                    placeholder="e.g. How do I reset my account password?"
-                  />
-                )}
-                <div className="flex gap-2 pt-2">
-                  <Button type="submit" disabled={submitting}>
-                    {submitting ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Starting...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="h-4 w-4" />
-                        Create & Execute
-                      </>
-                    )}
-                  </Button>
-                  <Button type="button" variant="secondary" onClick={() => setCreatingTemplate(null)}>
-                    Cancel
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
+        <Dialog
+          open
+          onClose={() => setCreatingTemplate(null)}
+          titleId="create-workflow-title"
+        >
+          <WorkflowCreateForm
+            template={creatingTemplate}
+            isSubmitting={createAndRunMutation.isPending}
+            onSubmit={(values) => {
+              createAndRunMutation.mutate({ ...values, template: creatingTemplate });
+            }}
+            onCancel={() => setCreatingTemplate(null)}
+          />
+        </Dialog>
       )}
 
       {/* Your workflows */}
       <section>
         <h2 className="mb-3 text-lg font-semibold">Your Workflows</h2>
-        {loadingWorkflows ? (
+        {workflowsQuery.isLoading ? (
           <p className="text-sm text-[var(--muted-foreground)]">Loading workflows...</p>
         ) : workflows.length === 0 ? (
           <Card>
@@ -525,15 +413,20 @@ export default function WorkflowsPage() {
                         variant="secondary"
                         size="sm"
                         onClick={() => {
-                          setActiveWorkflow(wf);
+                          setSelectedWfId(wf.id);
+                          setSelectedRunId(null);
                           setWfQuery("");
-                          loadLatestRun(wf.id);
+                          queryClient.invalidateQueries({ queryKey: ["workflow-runs", wf.id] });
                         }}
                       >
                         <GitBranch className="h-4 w-4" />
                         View
                       </Button>
-                      <Button size="sm" onClick={() => handleRunExisting(wf)} disabled={polling}>
+                      <Button
+                        size="sm"
+                        onClick={() => runExistingMutation.mutate(wf)}
+                        disabled={runExistingMutation.isPending || runsQuery.isFetching}
+                      >
                         <Play className="h-4 w-4" />
                         Run
                       </Button>
@@ -543,18 +436,6 @@ export default function WorkflowsPage() {
               })}
             </CardContent>
           </Card>
-        )}
-        {workflows.length > 0 && workflows.length < wfTotal && (
-          <div className="flex justify-center pt-2">
-            <Button variant="secondary" size="sm" onClick={loadMoreWorkflows} disabled={loadingMore}>
-              {loadingMore ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <FolderOpen className="h-4 w-4" />
-              )}
-              Load More ({workflows.length} of {wfTotal})
-            </Button>
-          </div>
         )}
       </section>
 
@@ -570,12 +451,17 @@ export default function WorkflowsPage() {
                 </h2>
                 {statusBadge(activeRun.status)}
               </div>
-              <div className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
+              <div
+                role="group"
+                aria-label="Run history"
+                className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--card)] p-1"
+              >
                 {runHistory.slice(0, 6).map((r) => (
                   <button
                     key={r.id}
-                    onClick={() => selectRun(r)}
+                    onClick={() => setSelectedRunId(r.id)}
                     title={`Run ${r.status}`}
+                    aria-label={`View run ${r.status}`}
                     className={`h-6 w-6 rounded-md text-[10px] font-bold transition ${
                       activeRun.id === r.id
                         ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
@@ -605,7 +491,7 @@ export default function WorkflowsPage() {
                   <TerminalSquare className="h-4 w-4" />
                   Execution Output Terminal
                 </span>
-                {polling && (
+                {runsQuery.isFetching && (
                   <span className="flex items-center gap-1 text-[10px] uppercase text-blue-400">
                     <Clock className="h-3 w-3 animate-spin" /> Live
                   </span>
@@ -641,38 +527,30 @@ export default function WorkflowsPage() {
             </div>
 
             {activeRun.status === "AWAITING_APPROVAL" && activeRun.approval_status === "PENDING" && (
-              <div className="rounded-xl border border-amber-500/50 bg-amber-500/5 p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <UserCheck className="h-5 w-5 text-amber-500" />
-                  <h3 className="font-semibold text-sm">Run paused — awaiting human approval</h3>
-                  <span className="ml-auto text-[11px] uppercase text-amber-500">Decision required</span>
-                </div>
-                <p className="text-xs text-[var(--muted-foreground)] mb-3">
-                  Sensitive data was detected. Approving resumes the run and records the compliance
-                  result in the audit log; rejecting terminates it.
-                </p>
-                <Input
-                  label="Reason / comment (optional)"
-                  id="decision-reason"
-                  value={decisionReason}
-                  onChange={(e) => setDecisionReason(e.target.value)}
-                  placeholder="e.g. Reviewed the finding — no true leak"
+              <Dialog
+                open
+                onClose={() => {}}
+                titleId="approval-title"
+                dismissible={false}
+              >
+                <ApprovalPanel
+                  workflowName={activeWorkflow.name}
+                  isSubmitting={decideMutation.isPending}
+                  onSubmit={(values) =>
+                    decideMutation.mutate({ action: "approve", reason: values.reason })
+                  }
+                  onReject={(values) =>
+                    decideMutation.mutate({ action: "reject", reason: values.reason })
+                  }
                 />
-                <div className="flex gap-2 pt-3">
-                  <Button size="sm" onClick={handleApprove}>
-                    <CheckCircle2 className="h-4 w-4" />
-                    Approve
-                  </Button>
-                  <Button size="sm" variant="secondary" onClick={handleReject}>
-                    <X className="h-4 w-4" />
-                    Reject
-                  </Button>
-                </div>
-              </div>
+              </Dialog>
             )}
 
             {activeRun.status === "FAILED" && activeRun.error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400"
+              >
                 <span className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4" />
                   {activeRun.error}
@@ -710,3 +588,5 @@ export default function WorkflowsPage() {
     </div>
   );
 }
+
+

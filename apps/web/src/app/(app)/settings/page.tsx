@@ -1,14 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Settings, User } from "lucide-react";
+import { Settings, User, Plug } from "lucide-react";
 import { authApi, type UserProfile } from "@/lib/api";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { GitHubConnectorPanel } from "@/components/integrations/GitHubConnectorPanel";
+import { useAllWorkspaces } from "@/lib/queries";
 
 export default function SettingsPage() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const workspacesQuery = useAllWorkspaces();
+  const workspaces = workspacesQuery.data ?? [];
 
   useEffect(() => {
     authApi
@@ -70,6 +75,18 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
+            <Plug className="h-5 w-5" />
+            <h2 className="font-semibold">Integrations</h2>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <GitHubConnectorPanel workspaces={workspaces} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
             <Settings className="h-5 w-5" />
             <h2 className="font-semibold">Platform Features</h2>
           </div>
@@ -80,7 +97,7 @@ export default function SettingsPage() {
             <li>Password reset & email verification — planned (FR-104/105)</li>
             <li>Session management — planned (FR-106)</li>
             <li>AI provider management — planned (FR-900)</li>
-            <li>Enterprise integrations — planned (FR-700)</li>
+            <li>Enterprise integrations — GitHub connector available; more planned (FR-700)</li>
           </ul>
         </CardContent>
       </Card>

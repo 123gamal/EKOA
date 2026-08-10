@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir \
     fastapi "uvicorn[standard]" "sqlalchemy[asyncio]" asyncpg alembic \
     "python-jose[cryptography]" bcrypt python-multipart \
     "celery[redis]" pymupdf python-docx tiktoken langchain-text-splitters \
-    email-validator
+    email-validator httpx cryptography
 
 COPY . .
 
@@ -71,7 +71,7 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
     "celery[redis]" \
     pymupdf python-docx tiktoken \
     langchain-text-splitters \
-    sqlalchemy asyncpg psycopg2-binary
+    sqlalchemy asyncpg psycopg2-binary httpx cryptography
 
 COPY . .
 

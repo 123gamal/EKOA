@@ -6,10 +6,11 @@ import Link from "next/link";
 import { Bot, User, Send, Loader2, Sparkles, FileText, Compass, Layers } from "lucide-react";
 import { getAccessToken } from "@/lib/auth";
 import { consumeSSE } from "@/lib/sse";
-import { workspaceApi, type Workspace } from "@/lib/api";
+import { useAllWorkspaces } from "@/lib/queries";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent } from "@/components/ui/Card";
+import { DegradedBanner } from "@/components/chat/DegradedBanner";
 
 interface Message {
   role: "user" | "assistant";
@@ -35,7 +36,8 @@ function ChatContent() {
   const searchParams = useSearchParams();
   const workspaceId = searchParams.get("workspace_id");
 
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const workspacesQuery = useAllWorkspaces();
+  const workspaces = workspacesQuery.data ?? [];
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -46,28 +48,6 @@ function ChatContent() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, agents, sending]);
-
-  useEffect(() => {
-    async function loadWorkspaces() {
-      try {
-        const orgs = await fetch("/api/v1/organizations/", {
-          headers: { Authorization: `Bearer ${getAccessToken()}` },
-        }).then((r) => r.json());
-
-        const all: Workspace[] = [];
-        if (orgs && Array.isArray(orgs.items)) {
-          for (const org of orgs.items) {
-            const ws = await workspaceApi.list(org.id);
-            all.push(...ws.items);
-          }
-        }
-        setWorkspaces(all);
-      } catch {
-        // ignore
-      }
-    }
-    loadWorkspaces();
-  }, []);
 
   const sendMessage = useCallback(async (customText?: string) => {
     const textToSend = (customText || input).trim();
@@ -257,13 +237,7 @@ function ChatContent() {
                   }`}
                 >
                   <p className="whitespace-pre-wrap">{msg.content}</p>
-                  {msg.degraded && (
-                    <div className="mt-3 rounded-lg border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-3 py-2 text-xs text-[var(--warning)]">
-                      <strong>AI temporarily unavailable:</strong> no configured LLM
-                      provider responded, so EKOA returned a local template answer
-                      instead. Check API keys or retry shortly.
-                    </div>
-                  )}
+                  {msg.degraded && <DegradedBanner />}
                   {msg.sources && msg.sources.length > 0 && (
                     <div className="mt-3 border-t border-[var(--border)]/50 pt-2">
                       <p className="mb-1 text-xs font-semibold opacity-75 flex items-center gap-1">

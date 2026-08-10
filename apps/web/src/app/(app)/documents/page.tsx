@@ -1,107 +1,60 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Upload, FileText, Loader2, RefreshCw, CheckCircle2, AlertCircle, Layers } from "lucide-react";
-import { documentApi, workspaceApi, type DocumentRecord, type Workspace } from "@/lib/api";
+import { documentApi, type DocumentRecord } from "@/lib/api";
+import { useAllWorkspaces } from "@/lib/queries";
 import { Button } from "@/components/ui/Button";
 import { Badge, statusBadgeVariant } from "@/components/ui/Badge";
 import { Card, CardContent } from "@/components/ui/Card";
+
+const POLL_INTERVAL_MS = 4000;
+const PAGE_SIZE = 25;
 
 function DocumentsContent() {
   const searchParams = useSearchParams();
   const workspaceId = searchParams.get("workspace_id");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
 
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [docs, setDocs] = useState<DocumentRecord[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  const loadDocs = useCallback(
-    async (nextPage = 1, append = false) => {
-      if (!workspaceId) return;
-      try {
-        const data = await documentApi.list(workspaceId, nextPage);
-        setTotal(data.total);
-        setPage(nextPage);
-        setDocs((prev) => (append ? [...prev, ...data.items] : data.items));
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : "Failed to load documents");
-      }
+  const workspacesQuery = useAllWorkspaces();
+  const workspaces = workspacesQuery.data ?? [];
+
+  const docsQuery = useInfiniteQuery({
+    queryKey: ["documents", workspaceId ?? null],
+    queryFn: ({ pageParam }) => documentApi.list(workspaceId!, pageParam, PAGE_SIZE),
+    enabled: !!workspaceId,
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.page < lastPage.pages ? lastPage.page + 1 : undefined,
+    // Status poll: refresh the fetched pages in place at the same cadence the
+    // manual implementation used, so PROCESSING -> INDEXED appears live.
+    refetchInterval: workspaceId ? POLL_INTERVAL_MS : false,
+  });
+
+  const docs = docsQuery.data?.pages.flatMap((p) => p.items) ?? [];
+  const total = docsQuery.data?.pages[0]?.total ?? 0;
+
+  const uploadMutation = useMutation({
+    mutationFn: ({ workspaceId: wsId, file }: { workspaceId: string; file: File }) =>
+      documentApi.upload(wsId, file),
+    onSuccess: (doc) => {
+      setSuccessMsg(`"${doc.title}" uploaded successfully and indexed into knowledge base!`);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      queryClient.invalidateQueries({ queryKey: ["documents", workspaceId ?? null] });
     },
-    [workspaceId]
-  );
-
-  useEffect(() => {
-    async function init() {
-      try {
-        const orgs = await fetch("/api/v1/organizations/", {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-          },
-        }).then((r) => r.json());
-
-        const all: Workspace[] = [];
-        if (orgs && Array.isArray(orgs.items)) {
-          for (const org of orgs.items) {
-            const ws = await workspaceApi.list(org.id);
-            all.push(...ws.items);
-          }
-        }
-        setWorkspaces(all);
-      } catch {
-        // ignore
-      }
-    }
-    init();
-  }, []);
-
-  useEffect(() => {
-    if (!workspaceId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    loadDocs().finally(() => setLoading(false));
-
-    // Status poll: refresh page 1 in place and merge, so Load More pages are
-    // preserved instead of being wiped by the 4s refresh.
-    const interval = setInterval(() => {
-      documentApi
-        .list(workspaceId, 1)
-        .then((data) => {
-          setTotal(data.total);
-          setDocs((prev) => {
-            const page1Ids = new Set(data.items.map((d) => d.id));
-            const older = prev.filter((d) => !page1Ids.has(d.id));
-            return [...data.items, ...older];
-          });
-        })
-        .catch(() => {
-          // transient poll failure - keep the current list
-        });
-    }, 4000);
-
-    return () => clearInterval(interval);
-  }, [workspaceId, loadDocs]);
-
-  async function loadMore() {
-    if (loadingMore || !workspaceId) return;
-    setLoadingMore(true);
-    try {
-      await loadDocs(page + 1, true);
-    } finally {
-      setLoadingMore(false);
-    }
-  }
+    onError: (e: unknown) => {
+      setError(e instanceof Error ? e.message : "Upload failed");
+    },
+  });
 
   async function uploadFile(file: File) {
     if (!workspaceId) {
@@ -112,13 +65,7 @@ function DocumentsContent() {
     setError("");
     setSuccessMsg("");
     try {
-      const doc = await documentApi.upload(workspaceId, file);
-      setDocs((prev) => [doc, ...prev]);
-      setSuccessMsg(`"${file.name}" uploaded successfully and indexed into knowledge base!`);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      setTimeout(() => loadDocs(), 1500);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Upload failed");
+      await uploadMutation.mutateAsync({ workspaceId, file });
     } finally {
       setUploading(false);
     }
@@ -235,7 +182,10 @@ function DocumentsContent() {
           </div>
 
           {error && (
-            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div
+              role="alert"
+              className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span>{error}</span>
             </div>
@@ -253,13 +203,19 @@ function DocumentsContent() {
               <Layers className="h-5 w-5 text-[var(--primary)]" />
               Workspace Documents ({total})
             </h2>
-            <Button variant="ghost" size="sm" onClick={() => loadDocs()}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                queryClient.invalidateQueries({ queryKey: ["documents", workspaceId ?? null] })
+              }
+            >
               <RefreshCw className="h-4 w-4" />
               Refresh Status
             </Button>
           </div>
 
-          {loading ? (
+          {docsQuery.isLoading ? (
             <div className="flex justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-[var(--muted-foreground)]" />
             </div>
@@ -298,8 +254,13 @@ function DocumentsContent() {
           )}
           {docs.length > 0 && docs.length < total && (
             <div className="flex justify-center pt-2">
-              <Button variant="secondary" size="sm" onClick={loadMore} disabled={loadingMore}>
-                {loadingMore ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => docsQuery.fetchNextPage()}
+                disabled={docsQuery.isFetchingNextPage || !docsQuery.hasNextPage}
+              >
+                {docsQuery.isFetchingNextPage ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <RefreshCw className="h-4 w-4" />

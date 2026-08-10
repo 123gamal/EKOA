@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from apps.api.models.document_version import DocumentVersion
     from apps.api.models.workflow import Workflow
     from apps.api.models.conversation import Conversation
+    from apps.api.models.connector import Connector
 
 
 class User(Base, TimestampMixin):
@@ -35,3 +36,7 @@ class User(Base, TimestampMixin):
     workflows: Mapped[List[Workflow]] = relationship(back_populates="creator")
     conversations: Mapped[List[Conversation]] = relationship(back_populates="owner", cascade="all, delete-orphan")
     document_versions: Mapped[List[DocumentVersion]] = relationship(back_populates="uploader")
+    connected_connectors: Mapped[List[Connector]] = relationship(
+        back_populates="connector_user",
+        foreign_keys="Connector.connected_by",
+    )

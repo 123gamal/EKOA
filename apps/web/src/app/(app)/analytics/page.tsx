@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   BarChart3,
   Cpu,
@@ -17,7 +17,9 @@ import {
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { analyticsApi, type AnalyticsOverview } from "@/lib/api";
+import { analyticsApi } from "@/lib/api";
+
+const PAGE_SIZE = 25;
 
 function MetricCard({
   title,
@@ -75,42 +77,25 @@ function actionLabel(action: string) {
 }
 
 export default function AnalyticsPage() {
-  const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
-  const [docRows, setDocRows] = useState<{ id: string; title: string; status: string; chunk_count: number; workspace: string; created_at: string }[]>([]);
-  const [docTotal, setDocTotal] = useState(0);
-  const [docPage, setDocPage] = useState(1);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const overviewQuery = useQuery({
+    queryKey: ["analytics-overview"],
+    queryFn: () => analyticsApi.overview(),
+  });
+  const overview = overviewQuery.data ?? null;
 
-  useEffect(() => {
-    Promise.all([analyticsApi.overview(), analyticsApi.documents()])
-      .then(([ov, docs]) => {
-        setOverview(ov);
-        setDocRows(docs.items);
-        setDocTotal(docs.total);
-        setDocPage(docs.page);
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
+  const docsQuery = useInfiniteQuery({
+    queryKey: ["analytics-documents"],
+    queryFn: ({ pageParam }) => analyticsApi.documents(pageParam, PAGE_SIZE),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.page < lastPage.pages ? lastPage.page + 1 : undefined,
+  });
+  const docRows =
+    docsQuery.data?.pages.flatMap((p) => p.items) ??
+    [];
+  const docTotal = docsQuery.data?.pages[0]?.total ?? 0;
 
-  async function loadMoreDocs() {
-    if (loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const data = await analyticsApi.documents(docPage + 1);
-      setDocRows((prev) => [...prev, ...data.items]);
-      setDocTotal(data.total);
-      setDocPage(data.page);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load more documents");
-    } finally {
-      setLoadingMore(false);
-    }
-  }
-
-  if (loading) {
+  if (overviewQuery.isLoading) {
     return (
       <div className="flex items-center justify-center py-24 gap-2">
         <Loader2 className="h-5 w-5 animate-spin text-[var(--primary)]" />
@@ -119,12 +104,14 @@ export default function AnalyticsPage() {
     );
   }
 
-  if (error || !overview) {
+  if (overviewQuery.isError || !overview) {
     return (
       <div className="mx-auto max-w-md space-y-4 py-16 text-center">
         <AlertTriangle className="mx-auto h-10 w-10 text-red-500" />
         <h1 className="text-xl font-bold">Analytics Unavailable</h1>
-        <p className="text-sm text-[var(--muted-foreground)]">{error || "Could not load analytics"}</p>
+        <p className="text-sm text-[var(--muted-foreground)]">
+          {overviewQuery.error instanceof Error ? overviewQuery.error.message : "Could not load analytics"}
+        </p>
       </div>
     );
   }
@@ -424,8 +411,13 @@ export default function AnalyticsPage() {
               </div>
               {docRows.length < docTotal && (
                 <div className="flex justify-center pt-3">
-                  <Button variant="secondary" size="sm" onClick={loadMoreDocs} disabled={loadingMore}>
-                    {loadingMore ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => docsQuery.fetchNextPage()}
+                    disabled={docsQuery.isFetchingNextPage || !docsQuery.hasNextPage}
+                  >
+                    {docsQuery.isFetchingNextPage ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <Activity className="h-4 w-4" />

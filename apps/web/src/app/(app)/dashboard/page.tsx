@@ -1,102 +1,101 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, FolderOpen, MessageSquare, FileText } from "lucide-react";
-import { orgApi, workspaceApi, type Organization, type Workspace } from "@/lib/api";
+import { orgApi, workspaceApi } from "@/lib/api";
 import { slugify } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 
 export default function DashboardPage() {
-  const [orgs, setOrgs] = useState<Organization[]>([]);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const queryClient = useQueryClient();
   const [selectedOrg, setSelectedOrg] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const [showOrgForm, setShowOrgForm] = useState(false);
   const [orgName, setOrgName] = useState("");
   const [orgSlug, setOrgSlug] = useState("");
   const [orgDesc, setOrgDesc] = useState("");
-  const [creatingOrg, setCreatingOrg] = useState(false);
 
   const [showWsForm, setShowWsForm] = useState(false);
   const [wsName, setWsName] = useState("");
   const [wsDesc, setWsDesc] = useState("");
-  const [creatingWs, setCreatingWs] = useState(false);
+
+  const orgsQuery = useQuery({
+    queryKey: ["orgs"],
+    queryFn: () => orgApi.list(),
+  });
+  const orgs = orgsQuery.data?.items ?? [];
+
+  const workspacesQuery = useQuery({
+    queryKey: ["workspaces", selectedOrg ?? "none"],
+    queryFn: () => workspaceApi.list(selectedOrg!),
+    enabled: !!selectedOrg,
+  });
+  const workspaces = workspacesQuery.data?.items ?? [];
 
   useEffect(() => {
-    orgApi
-      .list()
-      .then((data) => {
-        setOrgs(data.items);
-        if (data.items.length > 0) setSelectedOrg(data.items[0].id);
-        if (data.items.length === 0) setShowOrgForm(true);
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    if (!selectedOrg) {
-      setWorkspaces([]);
-      return;
+    if (selectedOrg === null && orgsQuery.data) {
+      setSelectedOrg(orgsQuery.data.items[0]?.id ?? null);
+      if (orgsQuery.data.items.length === 0) setShowOrgForm(true);
     }
-    workspaceApi
-      .list(selectedOrg)
-      .then((data) => setWorkspaces(data.items))
-      .catch((e) => setError(e.message));
-  }, [selectedOrg]);
+  }, [selectedOrg, orgsQuery.data]);
 
-  async function handleCreateOrg(e: FormEvent) {
-    e.preventDefault();
-    setCreatingOrg(true);
-    setError("");
-    try {
-      const org = await orgApi.create({
-        name: orgName,
-        slug: orgSlug || slugify(orgName),
-        description: orgDesc || undefined,
-      });
-      setOrgs((prev) => [...prev, org]);
+  const createOrgMutation = useMutation({
+    mutationFn: (data: { name: string; slug: string; description?: string }) =>
+      orgApi.create(data),
+    onSuccess: (org) => {
       setSelectedOrg(org.id);
       setShowOrgForm(false);
       setShowWsForm(true);
       setOrgName("");
       setOrgSlug("");
       setOrgDesc("");
-    } catch (e: unknown) {
+      queryClient.invalidateQueries({ queryKey: ["orgs"] });
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    },
+    onError: (e: unknown) => {
       setError(e instanceof Error ? e.message : "Failed to create organization");
-    } finally {
-      setCreatingOrg(false);
-    }
-  }
+    },
+  });
 
-  async function handleCreateWorkspace(e: FormEvent) {
-    e.preventDefault();
-    if (!selectedOrg) return;
-    setCreatingWs(true);
-    setError("");
-    try {
-      const ws = await workspaceApi.create({
-        name: wsName,
-        description: wsDesc || undefined,
-        organization_id: selectedOrg,
-      });
-      setWorkspaces((prev) => [...prev, ws]);
+  const createWsMutation = useMutation({
+    mutationFn: (data: { name: string; description?: string; organization_id: string }) =>
+      workspaceApi.create(data),
+    onSuccess: () => {
       setShowWsForm(false);
       setWsName("");
       setWsDesc("");
-    } catch (e: unknown) {
+      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    },
+    onError: (e: unknown) => {
       setError(e instanceof Error ? e.message : "Failed to create workspace");
-    } finally {
-      setCreatingWs(false);
-    }
+    },
+  });
+
+  function handleCreateOrg(e: React.FormEvent) {
+    e.preventDefault();
+    createOrgMutation.mutate({
+      name: orgName,
+      slug: orgSlug || slugify(orgName),
+      description: orgDesc || undefined,
+    });
   }
 
-  if (loading) {
+  function handleCreateWorkspace(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedOrg) return;
+    createWsMutation.mutate({
+      name: wsName,
+      description: wsDesc || undefined,
+      organization_id: selectedOrg,
+    });
+  }
+
+  if (orgsQuery.isLoading) {
     return (
       <div className="flex items-center justify-center py-24">
         <p className="text-[var(--muted-foreground)]">Loading dashboard...</p>
@@ -159,8 +158,8 @@ export default function DashboardPage() {
                 />
               </div>
               <div className="sm:col-span-2 flex gap-2">
-                <Button type="submit" disabled={creatingOrg}>
-                  {creatingOrg ? "Creating..." : "Create Organization"}
+                <Button type="submit" disabled={createOrgMutation.isPending}>
+                  {createOrgMutation.isPending ? "Creating..." : "Create Organization"}
                 </Button>
                 {orgs.length > 0 && (
                   <Button type="button" variant="secondary" onClick={() => setShowOrgForm(false)}>
@@ -223,8 +222,8 @@ export default function DashboardPage() {
                     onChange={(e) => setWsDesc(e.target.value)}
                   />
                   <div className="sm:col-span-2 flex gap-2">
-                    <Button type="submit" disabled={creatingWs}>
-                      {creatingWs ? "Creating..." : "Create Workspace"}
+                    <Button type="submit" disabled={createWsMutation.isPending}>
+                      {createWsMutation.isPending ? "Creating..." : "Create Workspace"}
                     </Button>
                     <Button type="button" variant="secondary" onClick={() => setShowWsForm(false)}>
                       Cancel

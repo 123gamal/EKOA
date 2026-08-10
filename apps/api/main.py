@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from apps.api.routes import auth, organizations, workspaces, documents, workflows, analytics
+from apps.api.routes import auth, organizations, workspaces, documents, workflows, analytics, connectors
 from apps.api.db.engine import get_engine
 from ekoa_config.settings import get_settings, resolve_cors_origins
 from ekoa_config.logging import setup_logging, CorrelationIdMiddleware
@@ -21,6 +21,7 @@ import apps.api.models.document  # noqa: F401
 import apps.api.models.session  # noqa: F401
 import apps.api.models.audit_log  # noqa: F401
 import apps.api.models.workflow  # noqa: F401
+import apps.api.models.connector  # noqa: F401
 
 setup_logging("api")
 
@@ -74,6 +75,7 @@ app.include_router(workspaces.router)
 app.include_router(documents.router)
 app.include_router(workflows.router)
 app.include_router(analytics.router)
+app.include_router(connectors.router)
 
 
 @app.get("/")

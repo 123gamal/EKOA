@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from apps.api.models.document import Document
     from apps.api.models.workflow import Workflow
     from apps.api.models.conversation import Conversation
+    from apps.api.models.connector import Connector
 
 
 class Workspace(Base, TimestampMixin):
@@ -32,3 +33,4 @@ class Workspace(Base, TimestampMixin):
     documents: Mapped[List[Document]] = relationship(back_populates="workspace", cascade="all, delete-orphan")
     workflows: Mapped[List[Workflow]] = relationship(back_populates="workspace", cascade="all, delete-orphan")
     conversations: Mapped[List[Conversation]] = relationship(back_populates="workspace", cascade="all, delete-orphan")
+    connectors: Mapped[List[Connector]] = relationship(back_populates="workspace", cascade="all, delete-orphan")

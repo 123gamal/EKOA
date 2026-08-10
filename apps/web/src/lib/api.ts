@@ -133,6 +133,37 @@ export interface AnalyticsOverview {
   }[];
 }
 
+export interface Connector {
+  id: string;
+  organization_id: string;
+  workspace_id: string;
+  provider: string;
+  name: string;
+  status: "connected" | "error" | "disconnected";
+  status_reason?: string | null;
+  connected_by: string;
+  connected_at?: string | null;
+  last_sync_at?: string | null;
+  last_sync_status?: "success" | "failed" | "running" | null;
+  last_sync_error?: string | null;
+  last_sync_document_count?: number | null;
+  config?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConnectorHealth {
+  id: string;
+  provider: string;
+  name: string;
+  status: "connected" | "error" | "disconnected";
+  token_valid: boolean;
+  detail: string;
+  last_sync_at?: string | null;
+  last_sync_status?: "success" | "failed" | "running" | null;
+  last_sync_error?: string | null;
+}
+
 let refreshPromise: Promise<boolean> | null = null;
 
 /**
@@ -360,6 +391,40 @@ export const analyticsApi = {
   async documents(page = 1, pageSize = 25): Promise<Paginated<DocumentRecord & { workspace: string }>> {
     const res = await apiFetch(`/analytics/documents?page=${page}&page_size=${pageSize}`);
     if (!res.ok) throw new Error("Failed to load document analytics");
+    return res.json();
+  },
+};
+
+export const connectorApi = {
+  async list(workspaceId: string, page = 1, pageSize = 25): Promise<Paginated<Connector>> {
+    const res = await apiFetch(`/connectors/?workspace_id=${workspaceId}&page=${page}&page_size=${pageSize}`);
+    if (!res.ok) throw new Error("Failed to list connectors");
+    return res.json();
+  },
+  async connect(data: {
+    provider: string;
+    workspace_id: string;
+    name: string;
+    access_token: string;
+    config: { owner: string; repo: string };
+  }): Promise<Connector> {
+    const res = await apiFetch("/connectors/", { method: "POST", body: JSON.stringify(data) });
+    if (!res.ok) throw new Error((await res.json()).detail || "Failed to connect integration");
+    return res.json();
+  },
+  async disconnect(id: string): Promise<Connector> {
+    const res = await apiFetch(`/connectors/${id}/disconnect`, { method: "POST" });
+    if (!res.ok) throw new Error((await res.json()).detail || "Failed to disconnect integration");
+    return res.json();
+  },
+  async sync(id: string): Promise<{ id: string; status: string; detail: string }> {
+    const res = await apiFetch(`/connectors/${id}/sync`, { method: "POST" });
+    if (!res.ok) throw new Error((await res.json()).detail || "Failed to trigger sync");
+    return res.json();
+  },
+  async health(id: string): Promise<ConnectorHealth> {
+    const res = await apiFetch(`/connectors/${id}/health`);
+    if (!res.ok) throw new Error("Failed to check connector health");
     return res.json();
   },
 };

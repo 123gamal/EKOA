@@ -12,4 +12,6 @@ dependencies = [
     "sentence-transformers",
     "langchain-text-splitters",
     "sqlalchemy",
+    "httpx",
+    "cryptography>=41.0",
 ]

@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import AsyncGenerator, Generator
 import pytest
 from httpx import AsyncClient, ASGITransport
@@ -8,6 +9,11 @@ from apps.api.db.base import Base
 from apps.api.db.engine import get_db
 from apps.api.main import app
 from ekoa_config.rate_limit import get_rate_limiter
+
+# Test-only Fernet key so connector credentials can be encrypted/decrypted in
+# tests without depending on the developer's .env. This is a throwaway key used
+# solely for the test suite, never a production secret.
+os.environ.setdefault("EKOA_FERNET_KEY", "Pn7QkC3vX9yW4mT8sL5jH2bG6rA1dE0fV9zK8nM3qX0=")
 
 # In-memory async SQLite database for fast unit testing
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"

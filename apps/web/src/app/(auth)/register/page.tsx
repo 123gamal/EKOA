@@ -1,40 +1,43 @@
 "use client";
 
-import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { authApi } from "@/lib/api";
+import { registerSchema, type RegisterValues } from "@/lib/validation";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card, CardContent } from "@/components/ui/Card";
 
 export default function RegisterPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [fullName, setFullName] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<RegisterValues>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: { fullName: "", email: "", password: "" },
+  });
 
+  async function onSubmit(values: RegisterValues) {
     try {
-      await authApi.register({ email, password, full_name: fullName });
+      await authApi.register({ email: values.email, password: values.password, full_name: values.fullName });
       router.push("/login");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Registration failed");
-    } finally {
-      setLoading(false);
+      setError("root", {
+        message: err instanceof Error ? err.message : "Registration failed",
+      });
     }
   }
 
   return (
     <Card className="w-full max-w-md">
       <CardContent className="pt-6">
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           <div className="mb-6 text-center">
             <h1 className="text-2xl font-bold">Create Account</h1>
             <p className="mt-1 text-sm text-[var(--muted-foreground)]">
@@ -42,9 +45,12 @@ export default function RegisterPage() {
             </p>
           </div>
 
-          {error && (
-            <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600 dark:bg-red-950/30 dark:text-red-400">
-              {error}
+          {errors.root && (
+            <div
+              role="alert"
+              className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600 dark:bg-red-950/30 dark:text-red-400"
+            >
+              {errors.root.message}
             </div>
           )}
 
@@ -52,35 +58,31 @@ export default function RegisterPage() {
             label="Full Name"
             id="fullName"
             type="text"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            required
             autoComplete="name"
+            error={errors.fullName?.message}
+            {...register("fullName")}
           />
 
           <Input
             label="Email"
             id="email"
             type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
             autoComplete="email"
+            error={errors.email?.message}
+            {...register("email")}
           />
 
           <Input
             label="Password"
             id="password"
             type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={8}
             autoComplete="new-password"
+            error={errors.password?.message}
+            {...register("password")}
           />
 
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Creating account..." : "Create Account"}
+          <Button type="submit" className="w-full" disabled={isSubmitting}>
+            {isSubmitting ? "Creating account..." : "Create Account"}
           </Button>
 
           <p className="text-center text-sm text-[var(--muted-foreground)]">

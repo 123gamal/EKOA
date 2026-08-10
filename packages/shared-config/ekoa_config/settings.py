@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # ── Connector credentials (encryption at rest) ───────────────────────
+    # Fernet key (urlsafe-base64 encoded 32-byte value, e.g. the output of
+    # ``cryptography.fernet.Fernet.generate_key()``) used to encrypt connector
+    # access tokens (GitHub PATs) before they are persisted. This is a
+    # SEPARATE secret from JWT_SECRET_KEY and must never be derived from it:
+    # connector tokens live in the same database as everything else, so the
+    # at-rest key is deliberately independent. Manage it like any other secret
+    # (env var, secrets manager, KMS); never hardcode it in the repository.
+    # Generate one with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    EKOA_FERNET_KEY: str = ""
+
     # ── CORS ─────────────────────────────────────────────────────────────
     # Explicit allow-list, NOT "*". FastAPI's CORSMiddleware refuses to work
     # with allow_credentials=True + "*", and browsers reject credentialed
@@ -92,6 +104,16 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "JWT_SECRET_KEY must be set to a strong random value when "
                 "ENVIRONMENT != development."
+            )
+        if (
+            self.ENVIRONMENT.lower() != "development"
+            and not self.EKOA_FERNET_KEY
+        ):
+            raise RuntimeError(
+                "EKOA_FERNET_KEY must be set to a Fernet key (see its "
+                "docstring for generation) when ENVIRONMENT != development. "
+                "Connector credentials are stored encrypted at rest and "
+                "cannot be persisted without this key."
             )
 
 

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from apps.api.models.org_member import OrgMember
     from apps.api.models.workspace import Workspace
     from apps.api.models.conversation import Conversation
+    from apps.api.models.connector import Connector
 
 
 class Organization(Base, TimestampMixin):
@@ -30,3 +31,4 @@ class Organization(Base, TimestampMixin):
     members: Mapped[List[OrgMember]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     workspaces: Mapped[List[Workspace]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     conversations: Mapped[List[Conversation]] = relationship(back_populates="organization", cascade="all, delete-orphan")
+    connectors: Mapped[List[Connector]] = relationship(back_populates="organization", cascade="all, delete-orphan")
