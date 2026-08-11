@@ -3,6 +3,14 @@ WORKDIR /app
 COPY apps/web/package.json ./
 RUN npm install
 
+# Production-only node_modules (no Vitest/TypeScript/etc.) for the runtime
+# image — built separately from `deps` so the dev dependency tree used to
+# build never ships in the final container.
+FROM node:24-alpine AS prod-deps
+WORKDIR /app
+COPY apps/web/package.json ./
+RUN npm install --omit=dev
+
 FROM node:24-alpine AS build
 WORKDIR /app
 # Rewrite targets for Next.js /api proxy. Overridden via compose build args
@@ -22,7 +30,7 @@ ENV NODE_ENV=production
 COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 COPY --from=build /app/package.json ./package.json
-COPY --from=deps /app/node_modules ./node_modules
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/next.config.ts ./
 COPY --from=build /app/tsconfig.json ./
 

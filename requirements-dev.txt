@@ -5,8 +5,12 @@
 # ── Test / lint tooling ───────────────────────────────────────────────────────
 pytest
 pytest-asyncio
+pytest-cov
 httpx
 ruff
+
+# ── Performance / load testing (Phase 10) ──────────────────────────────────────
+locust
 
 # ── API service (apps/api) ────────────────────────────────────────────────────
 fastapi

@@ -1,10 +1,10 @@
 # =============================================================================
-# EKOA CI — lint + test only (Phase 2 scope).
-# Runs on every push and pull request. Does NOT deploy and does not push
-# anywhere. This workflow only takes effect once the repository is pushed to
-# GitHub (a manual step, handled separately).
-# Coverage thresholds, security scanning, and deploy steps come in a later
-# phase.
+# EKOA CI — lint, test, coverage reporting, and Docker image builds.
+# Runs on every push and pull request. Does NOT deploy.
+# Coverage is measured and reported (coverage.xml artifact) but not yet
+# gated on a threshold — Phase 10 establishes the real baseline; a follow-up
+# phase should add --cov-fail-under once that number is known.
+# Security/dependency scanning (SAST/DAST/pip-audit) is still deferred.
 # =============================================================================
 
 name: CI
@@ -12,12 +12,24 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   lint-and-test:
     name: Lint & Test (Python)
     runs-on: ubuntu-latest
     timeout-minutes: 40
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout
@@ -41,8 +53,17 @@ jobs:
       - name: Ruff lint
         run: ruff check .
 
-      - name: Run test suite (SQLite, hermetic)
-        run: pytest tests/ -q --tb=short
+      - name: Run test suite (SQLite, hermetic) with coverage
+        run: |
+          pytest tests/ -q --tb=short \
+            --cov=apps --cov=packages \
+            --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
 
   test-postgres:
     name: Test (Postgres)
@@ -119,3 +140,72 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  docker-build:
+    name: Docker image build (all services)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build all images (api, ai, worker, mcp, nginx, web)
+        run: >
+          docker compose -f infrastructure/docker/docker-compose.yml
+          build api ai worker mcp nginx web
+
+  performance-smoke:
+    name: Performance smoke test (manual trigger)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Bring up the full stack
+        run: |
+          cp .env.example .env 2>/dev/null || true
+          docker compose -f infrastructure/docker/docker-compose.yml up -d --build
+
+      - name: Wait for services to report healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health; then
+              break
+            fi
+            echo "waiting for api..."; sleep 5
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Locust
+        run: pip install --no-cache-dir locust
+
+      - name: Run headless Locust smoke test
+        run: |
+          locust -f tests/performance/locustfile.py --host http://localhost:8000 \
+            --headless -u 20 -r 5 -t 60s --csv=locust-smoke --only-summary
+
+      - name: Upload Locust results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: locust-smoke-results
+          path: locust-smoke*
+
+      - name: Tear down the stack
+        if: always()
+        run: docker compose -f infrastructure/docker/docker-compose.yml down -v

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
@@ -64,6 +64,11 @@ async def create_mcp_api_key(
         )
     await authz.assert_min_role(db, current_user.id, org_id, "admin")
 
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(days=data.expires_in_days)
+        if data.expires_in_days is not None
+        else None
+    )
     raw_key = generate_mcp_api_key(org_id, data.workspace_id)
     api_key = McpApiKey(
         organization_id=org_id,
@@ -73,6 +78,7 @@ async def create_mcp_api_key(
         key_prefix=f"{KEY_PREFIX}{str(org_id)[:8]}_{str(data.workspace_id)[:8]}",
         status=McpApiKeyStatus.ACTIVE.value,
         created_by=current_user.id,
+        expires_at=expires_at,
     )
     db.add(api_key)
     await db.commit()
@@ -89,6 +95,7 @@ async def create_mcp_api_key(
             "workspace_id": str(api_key.workspace_id),
             "organization_id": str(api_key.organization_id),
             "key_prefix": api_key.key_prefix,
+            "expires_at": api_key.expires_at.isoformat() if api_key.expires_at else None,
         },
     )
     logger.info(
@@ -110,6 +117,7 @@ async def create_mcp_api_key(
         status=McpApiKeyStatus(api_key.status),
         created_by=api_key.created_by,
         created_at=api_key.created_at,
+        expires_at=api_key.expires_at,
     )
 
 
@@ -202,3 +210,86 @@ async def revoke_mcp_api_key(
         },
     )
     return api_key
+
+
+@router.post("/{key_id}/rotate", response_model=McpApiKeyCreatedResponse, status_code=status.HTTP_201_CREATED)
+async def rotate_mcp_api_key(
+    key_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rotate an MCP API key: issue a replacement, then revoke the old one.
+
+    Admin/owner-only and audited, same as create/revoke. The new key's raw
+    value is returned exactly once, same as at creation; the old key stops
+    working on its next use, same as an explicit revoke.
+    """
+    old_key = await _load_active_key(db, key_id)
+    if old_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="MCP API key not found"
+        )
+    await authz.assert_can_access_workspace(old_key.workspace_id, current_user, db)
+    org_id = await authz.org_id_for_workspace(db, old_key.workspace_id)
+    if org_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found"
+        )
+    await authz.assert_min_role(db, current_user.id, org_id, "admin")
+
+    raw_key = generate_mcp_api_key(org_id, old_key.workspace_id)
+    new_key = McpApiKey(
+        organization_id=org_id,
+        workspace_id=old_key.workspace_id,
+        name=f"{old_key.name} (rotated)",
+        key_hash=_hash_key(raw_key),
+        key_prefix=f"{KEY_PREFIX}{str(org_id)[:8]}_{str(old_key.workspace_id)[:8]}",
+        status=McpApiKeyStatus.ACTIVE.value,
+        created_by=current_user.id,
+        expires_at=old_key.expires_at,
+    )
+    db.add(new_key)
+
+    if old_key.status != McpApiKeyStatus.REVOKED.value:
+        old_key.status = McpApiKeyStatus.REVOKED.value
+        old_key.revoked_at = datetime.now(timezone.utc)
+        old_key.revoked_by = current_user.id
+
+    await db.commit()
+    await db.refresh(new_key)
+
+    await audit_service.log_action(
+        db,
+        user_id=current_user.id,
+        action="mcp_api_key.rotate",
+        resource_type="mcp_api_keys",
+        resource_id=new_key.id,
+        details={
+            "old_key_id": str(old_key.id),
+            "new_key_id": str(new_key.id),
+            "workspace_id": str(new_key.workspace_id),
+            "organization_id": str(new_key.organization_id),
+            "key_prefix": new_key.key_prefix,
+        },
+    )
+    logger.info(
+        "mcp_api_key_rotated",
+        extra={
+            "old_key_id": str(old_key.id),
+            "new_key_id": str(new_key.id),
+            "workspace_id": str(new_key.workspace_id),
+            "user_id": str(current_user.id),
+        },
+    )
+    return McpApiKeyCreatedResponse(
+        id=new_key.id,
+        organization_id=new_key.organization_id,
+        workspace_id=new_key.workspace_id,
+        name=new_key.name,
+        key=raw_key,
+        key_prefix=new_key.key_prefix,
+        status=McpApiKeyStatus(new_key.status),
+        created_by=new_key.created_by,
+        created_at=new_key.created_at,
+        expires_at=new_key.expires_at,
+    )

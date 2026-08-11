@@ -10,6 +10,7 @@ is rejected so the MCP endpoint answers with 401.
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -53,6 +54,13 @@ class EkoaTokenVerifier:
             logger.warning(
                 "mcp_key_rejected",
                 extra={"key_id": str(key.id), "reason": "revoked_or_inactive"},
+            )
+            return None
+
+        if key.expires_at is not None and key.expires_at <= datetime.now(timezone.utc):
+            logger.warning(
+                "mcp_key_rejected",
+                extra={"key_id": str(key.id), "reason": "expired"},
             )
             return None
 

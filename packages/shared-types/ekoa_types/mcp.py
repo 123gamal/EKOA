@@ -39,6 +39,11 @@ class McpApiKeyCreateRequest(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255, description="Human-readable label for the key")
     workspace_id: UUID
+    expires_in_days: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional TTL in days. Omit/null for a key that never expires.",
+    )
 
 
 class McpApiKeyCreatedResponse(BaseModel):
@@ -57,6 +62,7 @@ class McpApiKeyCreatedResponse(BaseModel):
     status: McpApiKeyStatus
     created_by: UUID
     created_at: datetime
+    expires_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -75,6 +81,7 @@ class McpApiKeyResponse(BaseModel):
     status: McpApiKeyStatus
     created_by: UUID
     created_at: datetime
+    expires_at: datetime | None = None
     last_used_at: datetime | None = None
     revoked_at: datetime | None = None
     revoked_by: UUID | None = None

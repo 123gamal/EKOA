@@ -361,8 +361,18 @@ async def test_retrieve_chunks_passes_tenant_filter(monkeypatch):
             captured.update(kwargs)
             return types.SimpleNamespace(points=[])
 
+    class FakeRedis:
+        """Always misses so the test is deterministic regardless of real Redis state."""
+
+        def get(self, key):
+            return None
+
+        def set(self, key, value, ex=None):
+            pass
+
     monkeypatch.setattr(retriever, "_get_embedder", lambda: FakeEmbedder())
     monkeypatch.setattr(retriever, "_get_qdrant", lambda: FakeClient())
+    monkeypatch.setattr(retriever, "get_sync_redis", lambda: FakeRedis())
 
     retriever.retrieve_chunks(
         "query",

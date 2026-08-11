@@ -60,9 +60,13 @@ class Settings(BaseSettings):
     # on http://localhost:3000 in local development.
     CORS_ORIGINS: str = '["http://localhost:3000"]'
 
-    # ── Rate limiting (per process; in-memory sliding window) ────────────
-    # General default applied to every request (per client IP); tighter limits
-    # are applied to the auth endpoints which are brute-force/spam targets.
+    # ── Rate limiting ──────────────────────────────────────────────────
+    # Backend: "memory" (per-process, default — used in tests/local dev
+    # without Docker) or "redis" (shared across replicas; set by
+    # docker-compose for the api/ai services). General default applied to
+    # every request (per client IP); tighter limits are applied to the auth
+    # endpoints which are brute-force/spam targets.
+    RATE_LIMIT_BACKEND: str = "memory"
     RATE_LIMIT_DEFAULT_LIMIT: int = 120
     RATE_LIMIT_DEFAULT_WINDOW_SECONDS: int = 60
     RATE_LIMIT_LOGIN_LIMIT: int = 10

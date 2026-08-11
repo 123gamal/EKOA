@@ -25,6 +25,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
     networks:
       - ekoa-network
 
@@ -46,11 +51,16 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
     networks:
       - ekoa-network
 
   # ---------------------------------------------------------------------------
-  # Redis 7 Alpine – Caching & message broker
+  # Redis 7 Alpine – Caching, rate limiting & message broker
   # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
@@ -67,6 +77,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+          cpus: "0.5"
     networks:
       - ekoa-network
 
@@ -87,6 +102,7 @@ services:
     environment:
       DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-ekoa_user}:${POSTGRES_PASSWORD:-ekoa_secret}@postgres:5432/${POSTGRES_DB:-ekoa_db}"
       REDIS_URL: "redis://redis:6379/0"
+      RATE_LIMIT_BACKEND: "redis"
       QDRANT_HOST: qdrant
       CORS_ORIGINS: '["http://localhost:3000"]'
       DEBUG: "true"
@@ -101,6 +117,11 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
     volumes:
       - uploads_data:/app/uploads
     networks:
@@ -122,6 +143,8 @@ services:
       - ../../.env
     environment:
       DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-ekoa_user}:${POSTGRES_PASSWORD:-ekoa_secret}@postgres:5432/${POSTGRES_DB:-ekoa_db}"
+      REDIS_URL: "redis://redis:6379/0"
+      RATE_LIMIT_BACKEND: "redis"
       QDRANT_HOST: qdrant
       CORS_ORIGINS: '["http://localhost:3000"]'
       DEBUG: "true"
@@ -130,12 +153,19 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health', timeout=5).status==200 else 1)"]
       interval: 15s
       timeout: 10s
       retries: 5
       start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
     networks:
       - ekoa-network
 
@@ -169,6 +199,11 @@ services:
       timeout: 30s
       retries: 3
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
     volumes:
       - uploads_data:/app/uploads
     networks:
@@ -207,6 +242,11 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
     networks:
       - ekoa-network
 
@@ -230,6 +270,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.25"
     networks:
       - ekoa-network
 
@@ -258,6 +303,11 @@ services:
       timeout: 5s
       retries: 10
       start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
     networks:
       - ekoa-network
 

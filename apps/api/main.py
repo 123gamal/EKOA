@@ -10,6 +10,7 @@ from apps.api.db.engine import get_engine
 from ekoa_config.settings import get_settings, resolve_cors_origins
 from ekoa_config.logging import setup_logging, CorrelationIdMiddleware
 from ekoa_config.rate_limit import RateLimitMiddleware
+from ekoa_config.redis_client import get_async_redis
 
 # Import models so they are registered on Base.metadata (required for Alembic
 # autogenerate; the schema itself is applied by migrations, not create_all).
@@ -103,6 +104,12 @@ async def health_check():
         dependencies["database"] = "ok"
     except Exception as exc:  # noqa: BLE001
         dependencies["database"] = f"error: {type(exc).__name__}"
+
+    try:
+        await get_async_redis().ping()
+        dependencies["redis"] = "ok"
+    except Exception as exc:  # noqa: BLE001
+        dependencies["redis"] = f"error: {type(exc).__name__}"
 
     healthy = all(v == "ok" for v in dependencies.values())
     body = {
