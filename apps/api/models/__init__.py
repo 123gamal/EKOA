@@ -11,6 +11,7 @@ from apps.api.models.workflow import Workflow, WorkflowRun
 from apps.api.models.conversation import Conversation, Message
 from apps.api.models.document_version import DocumentVersion
 from apps.api.models.connector import Connector, ConnectorCredential
+from apps.api.models.mcp_api_key import McpApiKey
 
 __all__ = [
     "User",
@@ -27,4 +28,5 @@ __all__ = [
     "DocumentVersion",
     "Connector",
     "ConnectorCredential",
+    "McpApiKey",
 ]

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from apps.api.models.workflow import Workflow
     from apps.api.models.conversation import Conversation
     from apps.api.models.connector import Connector
+    from apps.api.models.mcp_api_key import McpApiKey
 
 
 class User(Base, TimestampMixin):
@@ -39,4 +40,8 @@ class User(Base, TimestampMixin):
     connected_connectors: Mapped[List[Connector]] = relationship(
         back_populates="connector_user",
         foreign_keys="Connector.connected_by",
+    )
+    created_mcp_api_keys: Mapped[List[McpApiKey]] = relationship(
+        back_populates="creator",
+        foreign_keys="McpApiKey.created_by",
     )

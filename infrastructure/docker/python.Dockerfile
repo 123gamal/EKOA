@@ -76,3 +76,21 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 COPY . .
 
 CMD ["celery", "-A", "apps.worker.main", "worker", "--loglevel=info", "--concurrency=2"]
+
+# ---------------------------------------------------------------------------
+# Stage 4 – MCP server: Streamable HTTP tools (search / list documents)
+# ---------------------------------------------------------------------------
+FROM base AS mcp
+
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir \
+    sentence-transformers qdrant-client \
+    fastapi "uvicorn[standard]" \
+    "sqlalchemy[asyncio]" asyncpg \
+    email-validator httpx cryptography \
+    mcp
+
+COPY . .
+
+EXPOSE 8002
+CMD ["sh", "-c", "cd /app && python -m apps.mcp_server.main"]

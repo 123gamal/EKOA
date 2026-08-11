@@ -35,3 +35,6 @@ tiktoken
 langchain-text-splitters
 qdrant-client
 sentence-transformers
+
+# ── MCP server (apps/mcp_server) ──────────────────────────────────────────────
+mcp

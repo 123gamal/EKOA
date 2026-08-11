@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from apps.api.models.workflow import Workflow
     from apps.api.models.conversation import Conversation
     from apps.api.models.connector import Connector
+    from apps.api.models.mcp_api_key import McpApiKey
 
 
 class Workspace(Base, TimestampMixin):
@@ -34,3 +35,4 @@ class Workspace(Base, TimestampMixin):
     workflows: Mapped[List[Workflow]] = relationship(back_populates="workspace", cascade="all, delete-orphan")
     conversations: Mapped[List[Conversation]] = relationship(back_populates="workspace", cascade="all, delete-orphan")
     connectors: Mapped[List[Connector]] = relationship(back_populates="workspace", cascade="all, delete-orphan")
+    mcp_api_keys: Mapped[List[McpApiKey]] = relationship(back_populates="workspace", cascade="all, delete-orphan")

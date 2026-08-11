@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from apps.api.models.workspace import Workspace
     from apps.api.models.conversation import Conversation
     from apps.api.models.connector import Connector
+    from apps.api.models.mcp_api_key import McpApiKey
 
 
 class Organization(Base, TimestampMixin):
@@ -32,3 +33,4 @@ class Organization(Base, TimestampMixin):
     workspaces: Mapped[List[Workspace]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     conversations: Mapped[List[Conversation]] = relationship(back_populates="organization", cascade="all, delete-orphan")
     connectors: Mapped[List[Connector]] = relationship(back_populates="organization", cascade="all, delete-orphan")
+    mcp_api_keys: Mapped[List[McpApiKey]] = relationship(back_populates="organization", cascade="all, delete-orphan")

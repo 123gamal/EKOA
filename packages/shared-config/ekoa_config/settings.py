@@ -88,6 +88,19 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
 
+    # ── MCP server (Phase 8) ─────────────────────────────────────────────
+    # The MCP server exposes two tenant-scoped tools (search_knowledge_base,
+    # list_documents) over the Streamable HTTP transport. Clients authenticate
+    # with a bearer MCP API key whose raw value is shown once at creation and
+    # stored only as a SHA-256 hash. issuer/resource URLs feed AuthSettings
+    # metadata (the protocol requires them); bearer verification never touches
+    # the OAuth endpoint because EKOA issues its own static keys.
+    MCP_HOST: str = "0.0.0.0"
+    MCP_PORT: int = 8002
+    MCP_STREAMABLE_HTTP_PATH: str = "/mcp"
+    MCP_ISSUER_URL: str = "http://localhost:8002/"
+    MCP_RESOURCE_SERVER_URL: str = "http://localhost:8002/mcp"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
