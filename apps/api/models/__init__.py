@@ -12,6 +12,7 @@ from apps.api.models.conversation import Conversation, Message
 from apps.api.models.document_version import DocumentVersion
 from apps.api.models.connector import Connector, ConnectorCredential
 from apps.api.models.mcp_api_key import McpApiKey
+from apps.api.models.ai_call_log import AiCallLog
 
 __all__ = [
     "User",
@@ -29,4 +30,5 @@ __all__ = [
     "Connector",
     "ConnectorCredential",
     "McpApiKey",
+    "AiCallLog",
 ]

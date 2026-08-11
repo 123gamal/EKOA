@@ -13,6 +13,11 @@ import {
   AlertTriangle,
   Building2,
   GitBranch,
+  Gauge,
+  Timer,
+  DollarSign,
+  ShieldAlert,
+  CheckCircle2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -95,6 +100,12 @@ export default function AnalyticsPage() {
     [];
   const docTotal = docsQuery.data?.pages[0]?.total ?? 0;
 
+  const modelPerfQuery = useQuery({
+    queryKey: ["analytics-model-performance"],
+    queryFn: () => analyticsApi.modelPerformance(7),
+  });
+  const perf = modelPerfQuery.data ?? null;
+
   if (overviewQuery.isLoading) {
     return (
       <div className="flex items-center justify-center py-24 gap-2">
@@ -160,6 +171,173 @@ export default function AnalyticsPage() {
           sub={`${runByStatus.COMPLETED || 0} completed`}
           icon={<GitBranch className="h-5 w-5" />}
         />
+      </div>
+
+      {/* Model Performance (computed from ai_call_logs telemetry — real data) */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2">
+            <Gauge className="h-5 w-5 text-violet-500" />
+            Model Performance
+          </h2>
+          {modelPerfQuery.isLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin text-[var(--muted-foreground)]" />
+          ) : (
+            <Badge variant="info">
+              {perf?.summary.calls ?? 0} calls tracked
+            </Badge>
+          )}
+        </div>
+
+        {modelPerfQuery.isError ? (
+          <Card>
+            <CardContent className="flex items-center gap-2 p-5 text-sm text-[var(--muted-foreground)]">
+              <AlertTriangle className="h-4 w-4 text-red-500" />
+              {modelPerfQuery.error instanceof Error
+                ? modelPerfQuery.error.message
+                : "Could not load model performance"}
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <MetricCard
+                title="Avg LLM Latency"
+                value={perf?.summary.avg_latency_ms != null ? `${perf.summary.avg_latency_ms.toFixed(0)} ms` : "—"}
+                sub={perf?.summary.p95_latency_ms != null ? `p95: ${perf.summary.p95_latency_ms.toFixed(0)} ms` : "no data yet"}
+                icon={<Timer className="h-5 w-5" />}
+              />
+              <MetricCard
+                title="Tokens"
+                value={(perf?.summary.total_tokens ?? 0).toLocaleString()}
+                sub={`${(perf?.summary.prompt_tokens ?? 0).toLocaleString()} prompt · ${(perf?.summary.completion_tokens ?? 0).toLocaleString()} completion`}
+                icon={<Database className="h-5 w-5" />}
+              />
+              <MetricCard
+                title="Degraded Rate"
+                value={`${((perf?.summary.degraded_rate ?? 0) * 100).toFixed(1)}%`}
+                sub="fallback template used"
+                icon={<AlertTriangle className="h-5 w-5" />}
+              />
+              <MetricCard
+                title="Guardrail Trigger Rate"
+                value={`${((perf?.summary.guardrail_trigger_rate ?? 0) * 100).toFixed(1)}%`}
+                sub="input heuristic flagged"
+                icon={<ShieldAlert className="h-5 w-5" />}
+              />
+              <MetricCard
+                title="Citation Drop Rate"
+                value={`${((perf?.summary.citation_drop_rate ?? 0) * 100).toFixed(1)}%`}
+                sub="unverified citations dropped"
+                icon={<CheckCircle2 className="h-5 w-5" />}
+              />
+              <MetricCard
+                title="Est. Cost"
+                value={perf?.summary.est_cost_usd ? `$${perf.summary.est_cost_usd.toFixed(4)}` : "$0.00"}
+                sub={perf?.summary.calls ? `${perf.summary.calls} calls` : "no data yet"}
+                icon={<DollarSign className="h-5 w-5" />}
+              />
+            </div>
+
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-base flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-violet-500" />
+                    Daily Token Usage — last 7 days
+                  </h3>
+                  <span className="text-[11px] text-[var(--muted-foreground)]">
+                    {(perf?.daily ?? []).some((d) => d.calls > 0) ? "Real telemetry" : "No calls yet"}
+                  </span>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="flex h-40 items-end justify-between gap-2">
+                  {(perf?.daily ?? []).map((d) => {
+                    const max = Math.max(1, ...(perf?.daily ?? []).map((x) => x.total_tokens));
+                    return (
+                      <div key={d.date} className="flex flex-1 flex-col items-center gap-1">
+                        <span className="text-[10px] font-mono text-[var(--muted-foreground)]">
+                          {d.calls > 0 ? d.total_tokens : ""}
+                        </span>
+                        <div
+                          className="w-full max-w-10 rounded-t-md bg-gradient-to-t from-violet-600 to-fuchsia-400 transition-all"
+                          style={{ height: `${d.calls > 0 ? Math.max(6, (d.total_tokens / max) * 100) : 4}px` }}
+                        />
+                        <span className="text-[10px] text-[var(--muted-foreground)]">
+                          {new Date(d.date).toLocaleDateString(undefined, { weekday: "short" })}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-base">Recent AI Calls</h3>
+                  {perf?.summary.calls ? (
+                    <span className="text-xs text-[var(--muted-foreground)]">
+                      providers:{" "}
+                      {Object.entries(perf.summary.providers)
+                        .map(([p, n]) => `${p}: ${n}`)
+                        .join(" · ")}
+                    </span>
+                  ) : null}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {!perf?.recent_calls.items.length ? (
+                  <p className="py-4 text-center text-sm text-[var(--muted-foreground)]">
+                    No AI calls recorded yet. Ask a question in Chat to populate model performance.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="border-b border-[var(--border)] text-xs text-[var(--muted-foreground)] uppercase">
+                        <tr>
+                          <th className="py-3 px-2">Provider / Model</th>
+                          <th className="py-3 px-2">Latency</th>
+                          <th className="py-3 px-2">Tokens</th>
+                          <th className="py-3 px-2">Flags</th>
+                          <th className="py-3 px-2">Est. Cost</th>
+                          <th className="py-3 px-2">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--border)]">
+                        {perf.recent_calls.items.map((c) => (
+                          <tr key={c.id} className="hover:bg-[var(--muted)]/50 transition">
+                            <td className="py-3 px-2 font-medium">{c.provider ?? "fallback"}{c.model ? ` · ${c.model}` : ""}</td>
+                            <td className="py-3 px-2 text-xs font-mono">{c.latency_ms != null ? `${c.latency_ms} ms` : "—"}</td>
+                            <td className="py-3 px-2 text-xs font-mono">{c.total_tokens ?? "—"}</td>
+                            <td className="py-3 px-2">
+                              <div className="flex flex-wrap gap-1">
+                                {c.degraded && <Badge variant="warning">degraded</Badge>}
+                                {c.guardrail_triggered && <Badge variant="warning">guardrail</Badge>}
+                                {c.citations_dropped && <Badge variant="error">citations dropped</Badge>}
+                                {!c.degraded && !c.guardrail_triggered && !c.citations_dropped && (
+                                  <span className="text-xs text-[var(--muted-foreground)]">—</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3 px-2 text-xs font-mono">
+                              {c.cost_estimate != null ? `$${c.cost_estimate.toFixed(6)}` : "—"}
+                            </td>
+                            <td className="py-3 px-2 text-xs text-[var(--muted-foreground)]">
+                              {new Date(c.created_at).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">

@@ -43,6 +43,7 @@ class AgentState(TypedDict):
     guardrail_flags: list[dict]
     citations: list[str]
     citations_unverified: bool
+    llm_telemetry: dict
 
 
 # ── Agent Node Implementations ───────────────────────────────────────────────
@@ -207,14 +208,17 @@ def document_node(state: AgentState) -> dict:
     }
 
 
-def _call_llm(messages: list[dict[str, str]], context: str | None = None) -> tuple[str, bool]:
+def _call_llm(messages: list[dict[str, str]], context: str | None = None) -> tuple[str, bool, dict]:
     """Call the configured LLM provider (deepseek or gemini) with messages and optional context.
 
-    Returns (answer, degraded). ``degraded`` is True only when no real LLM
-    provider answered and the local fallback template was used instead.
+    Returns ``(answer, degraded, telemetry)``. ``degraded`` is True only when
+    no real LLM provider answered and the local fallback template was used
+    instead. ``telemetry`` carries provider, model, latency in ms, and token
+    counts (null when the provider SDK does not report them), which the caller
+    persists to ``AiCallLog``.
 
-    Emits structured telemetry per call: provider, latency in ms, and token
-    counts when the provider SDK reports them (omitted as null otherwise).
+    Emits structured telemetry per call (unchanged Phase 2 behaviour) that
+    mirrors the returned dict.
     """
     user_msg = messages[-1]["content"] if messages else ""
 
@@ -251,19 +255,20 @@ def _call_llm(messages: list[dict[str, str]], context: str | None = None) -> tup
             )
             elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
             usage = getattr(resp, "usage", None)
+            telemetry = {
+                "provider": "deepseek",
+                "model": settings.DEEPSEEK_MODEL,
+                "latency_ms": elapsed_ms,
+                "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                "completion_tokens": getattr(usage, "completion_tokens", None),
+                "total_tokens": getattr(usage, "total_tokens", None),
+            }
             llm_logger.info(
                 "llm_call",
-                extra={
-                    "provider": "deepseek",
-                    "model": settings.DEEPSEEK_MODEL,
-                    "latency_ms": elapsed_ms,
-                    "prompt_tokens": getattr(usage, "prompt_tokens", None),
-                    "completion_tokens": getattr(usage, "completion_tokens", None),
-                    "total_tokens": getattr(usage, "total_tokens", None),
-                },
+                extra=telemetry,
             )
             if resp.choices[0].message.content:
-                return resp.choices[0].message.content.strip(), False
+                return resp.choices[0].message.content.strip(), False, telemetry
         except Exception as exc:
             llm_logger.warning(
                 "llm_call_failed",
@@ -291,19 +296,20 @@ def _call_llm(messages: list[dict[str, str]], context: str | None = None) -> tup
             resp = model.generate_content(prompt)
             elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
             usage = getattr(resp, "usage_metadata", None)
+            telemetry = {
+                "provider": "gemini",
+                "model": settings.GEMINI_MODEL,
+                "latency_ms": elapsed_ms,
+                "prompt_tokens": getattr(usage, "prompt_token_count", None),
+                "completion_tokens": getattr(usage, "candidates_token_count", None),
+                "total_tokens": getattr(usage, "total_token_count", None),
+            }
             llm_logger.info(
                 "llm_call",
-                extra={
-                    "provider": "gemini",
-                    "model": settings.GEMINI_MODEL,
-                    "latency_ms": elapsed_ms,
-                    "prompt_tokens": getattr(usage, "prompt_token_count", None),
-                    "completion_tokens": getattr(usage, "candidates_token_count", None),
-                    "total_tokens": getattr(usage, "total_token_count", None),
-                },
+                extra=telemetry,
             )
             if resp.text:
-                return resp.text.strip(), False
+                return resp.text.strip(), False, telemetry
         except Exception as exc:
             llm_logger.warning(
                 "llm_call_failed",
@@ -311,7 +317,14 @@ def _call_llm(messages: list[dict[str, str]], context: str | None = None) -> tup
             )
 
     llm_logger.warning("llm_fallback_used", extra={"reason": "no_provider_answered"})
-    return _fallback_answer(messages, context), True
+    return _fallback_answer(messages, context), True, {
+        "provider": None,
+        "model": None,
+        "latency_ms": None,
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "total_tokens": None,
+    }
 
 
 def _fallback_answer(messages: list[dict], context: str | None) -> str:
@@ -397,7 +410,7 @@ def synthesize_node(state: AgentState) -> dict:
     if chunks:
         context = "\n\n".join(c["text"] for c in chunks if c.get("text"))
 
-    answer, degraded = _call_llm(state["messages"], context)
+    answer, degraded, telemetry = _call_llm(state["messages"], context)
 
     # Citation integrity: verify the model's cited document IDs against the
     # chunks actually retrieved for this query before anything is sent back.
@@ -440,6 +453,7 @@ def synthesize_node(state: AgentState) -> dict:
         "degraded": degraded,
         "citations": citations,
         "citations_unverified": citations_unverified,
+        "llm_telemetry": telemetry,
         "actions": state["actions"] + [action],
     }
 

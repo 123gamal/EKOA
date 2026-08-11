@@ -172,16 +172,40 @@ class TestTextUtils:
         result = truncate_text("Hello World", max_length=1)
         assert len(result) == 1
 
-    def test_count_tokens_empty(self):
+    def test_count_tokens_empty(self, monkeypatch):
+        import sys
         from ekoa_utils.text import count_tokens
+        # Hermetic: a None entry for tiktoken in sys.modules makes `import tiktoken`
+        # raise ImportError inside count_tokens, so this never touches the network
+        # (tiktoken.get_encoding would otherwise download a tokenizer file).
+        monkeypatch.setitem(sys.modules, "tiktoken", None)
         assert count_tokens("") == 0
+        assert count_tokens("   ") >= 0
 
-    def test_count_tokens_short(self):
+    def test_count_tokens_uses_tiktoken_when_available(self, monkeypatch):
+        import sys
+        import types
         from ekoa_utils.text import count_tokens
+        fake_tiktoken = types.SimpleNamespace(
+            get_encoding=lambda _name: types.SimpleNamespace(
+                encode=lambda _text: list(range(5))
+            )
+        )
+        monkeypatch.setitem(sys.modules, "tiktoken", fake_tiktoken)
+        assert count_tokens("Hello world") == 5
+
+    def test_count_tokens_heuristic_when_tiktoken_unavailable(self, monkeypatch):
+        import sys
+        from ekoa_utils.text import count_tokens
+        # A None entry in sys.modules makes ``import tiktoken`` raise
+        # ImportError inside count_tokens, exercising the zero-network fallback.
+        monkeypatch.setitem(sys.modules, "tiktoken", None)
         assert count_tokens("Hello world") >= 1
 
-    def test_count_tokens_long(self):
+    def test_count_tokens_long(self, monkeypatch):
+        import sys
         from ekoa_utils.text import count_tokens
+        monkeypatch.setitem(sys.modules, "tiktoken", None)
         long_text = "word " * 1000
         assert count_tokens(long_text) > 10
 

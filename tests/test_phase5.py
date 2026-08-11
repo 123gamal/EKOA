@@ -301,7 +301,12 @@ async def test_check_input_guardrails_heuristics():
 
 
 async def test_graph_flags_injection_and_continues(monkeypatch):
-    monkeypatch.setattr(graph_mod, "_call_llm", lambda messages, context=None: ("ok answer", False))
+    monkeypatch.setattr(
+        graph_mod, "_call_llm",
+        lambda messages, context=None: (
+            "ok answer", False, {"provider": "deepseek", "model": "deepseek-chat"},
+        ),
+    )
     monkeypatch.setattr(
         graph_mod, "retrieve_chunks",
         lambda query, collection_name, organization_id=None, workspace_id=None: [],
@@ -341,7 +346,10 @@ async def test_graph_strips_unverified_citations(monkeypatch):
     fake = "22222222-2222-2222-2222-222222222222"
     monkeypatch.setattr(
         graph_mod, "_call_llm",
-        lambda messages, context=None: (f"Based on the docs. CITATIONS: [{real}, {fake}]", False),
+        lambda messages, context=None: (
+            f"Based on the docs. CITATIONS: [{real}, {fake}]", False,
+            {"provider": "deepseek", "model": "deepseek-chat"},
+        ),
     )
     monkeypatch.setattr(
         graph_mod, "retrieve_chunks",
@@ -372,7 +380,10 @@ async def test_graph_all_verified_no_flag(monkeypatch):
     doc_b = "22222222-2222-2222-2222-222222222222"
     monkeypatch.setattr(
         graph_mod, "_call_llm",
-        lambda messages, context=None: (f"Summary. CITATIONS: [{doc_a}, {doc_b}]", False),
+        lambda messages, context=None: (
+            f"Summary. CITATIONS: [{doc_a}, {doc_b}]", False,
+            {"provider": "deepseek", "model": "deepseek-chat"},
+        ),
     )
     monkeypatch.setattr(
         graph_mod, "retrieve_chunks",
@@ -402,7 +413,10 @@ async def test_graph_falls_back_to_retrieved_when_no_claims(monkeypatch):
     doc_a = "11111111-1111-1111-1111-111111111111"
     monkeypatch.setattr(
         graph_mod, "_call_llm",
-        lambda messages, context=None: ("Plain answer with no citations line.", False),
+        lambda messages, context=None: (
+            "Plain answer with no citations line.", False,
+            {"provider": "deepseek", "model": "deepseek-chat"},
+        ),
     )
     monkeypatch.setattr(
         graph_mod, "retrieve_chunks",

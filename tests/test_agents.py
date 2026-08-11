@@ -232,7 +232,12 @@ async def test_agent_graph_not_degraded_when_llm_answers(monkeypatch):
     """A real LLM answer must propagate degraded=False through the graph."""
     import apps.ai.graph as graph_mod
 
-    monkeypatch.setattr(graph_mod, "_call_llm", lambda messages, context=None: ("real answer", False))
+    monkeypatch.setattr(
+        graph_mod, "_call_llm",
+        lambda messages, context=None: (
+            "real answer", False, {"provider": "deepseek", "model": "deepseek-chat"},
+        ),
+    )
 
     state: AgentState = {
         "messages": [{"role": "user", "content": "Hello"}],
@@ -245,6 +250,7 @@ async def test_agent_graph_not_degraded_when_llm_answers(monkeypatch):
     result = await graph_mod.build_agent_graph().ainvoke(state)
     assert result["final_answer"] == "real answer"
     assert result["degraded"] is False
+    assert result["llm_telemetry"]["provider"] == "deepseek"
 
 
 @pytest.mark.asyncio
@@ -252,7 +258,13 @@ async def test_agent_graph_degraded_flag_when_llm_unavailable(monkeypatch):
     """When _call_llm falls back to templates, degraded must be True."""
     import apps.ai.graph as graph_mod
 
-    monkeypatch.setattr(graph_mod, "_call_llm", lambda messages, context=None: ("template fallback", True))
+    monkeypatch.setattr(
+        graph_mod, "_call_llm",
+        lambda messages, context=None: (
+            "template fallback", True,
+            {"provider": None, "model": None, "latency_ms": None},
+        ),
+    )
 
     state: AgentState = {
         "messages": [{"role": "user", "content": "Hello"}],

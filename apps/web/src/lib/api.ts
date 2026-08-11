@@ -133,6 +133,54 @@ export interface AnalyticsOverview {
   }[];
 }
 
+// Model performance is computed from ai_call_logs telemetry (FR-1000).
+export interface ModelPerformanceSummary {
+  calls: number;
+  avg_latency_ms: number | null;
+  p95_latency_ms: number | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  degraded_rate: number;
+  guardrail_trigger_rate: number;
+  citation_drop_rate: number;
+  est_cost_usd: number;
+  cost_is_estimate: boolean;
+  providers: Record<string, number>;
+}
+
+export interface ModelPerformanceDaily {
+  date: string;
+  calls: number;
+  avg_latency_ms: number | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  est_cost_usd: number;
+}
+
+export interface ModelPerformanceCall {
+  id: string;
+  provider: string | null;
+  model: string | null;
+  latency_ms: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  degraded: boolean;
+  guardrail_triggered: boolean;
+  citations_dropped: boolean;
+  cost_estimate: number | null;
+  workspace_id: string;
+  created_at: string;
+}
+
+export interface ModelPerformanceResponse {
+  summary: ModelPerformanceSummary;
+  daily: ModelPerformanceDaily[];
+  recent_calls: Paginated<ModelPerformanceCall>;
+}
+
 export interface Connector {
   id: string;
   organization_id: string;
@@ -391,6 +439,13 @@ export const analyticsApi = {
   async documents(page = 1, pageSize = 25): Promise<Paginated<DocumentRecord & { workspace: string }>> {
     const res = await apiFetch(`/analytics/documents?page=${page}&page_size=${pageSize}`);
     if (!res.ok) throw new Error("Failed to load document analytics");
+    return res.json();
+  },
+  async modelPerformance(days = 7, page = 1, pageSize = 10): Promise<ModelPerformanceResponse> {
+    const res = await apiFetch(
+      `/analytics/model-performance?days=${days}&page=${page}&page_size=${pageSize}`
+    );
+    if (!res.ok) throw new Error("Failed to load AI model performance");
     return res.json();
   },
 };

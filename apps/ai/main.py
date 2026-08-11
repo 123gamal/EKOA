@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -18,6 +19,7 @@ from apps.ai.deps import get_current_user, assert_workspace_access_for_user
 from apps.api.models.user import User
 from apps.api.models.workspace import Workspace
 from apps.api.models.conversation import Conversation, Message
+from apps.api.models.ai_call_log import AiCallLog
 from apps.api.db.engine import get_db, get_engine
 from apps.api.services import audit_service
 from ekoa_config.settings import get_settings, resolve_cors_origins
@@ -30,6 +32,7 @@ from ekoa_types.pagination import (
     MAX_PAGE_SIZE,
     Paginated,
 )
+from ekoa_utils.cost import estimate_call_cost
 from ekoa_utils.naming import workspace_collection_name
 
 setup_logging("ai")
@@ -194,6 +197,7 @@ def _build_initial_state(
         "guardrail_flags": [],
         "citations": [],
         "citations_unverified": False,
+        "llm_telemetry": {},
     }
 
 
@@ -248,6 +252,56 @@ def _verified_sources(result: dict, context_chunks: list[dict]) -> list[str]:
     if "citations" in result:
         return list(result.get("citations") or [])
     return list(set(c["document_id"] for c in context_chunks if c.get("document_id")))
+
+
+async def _write_ai_call_log(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    conversation: Conversation,
+    result: dict,
+    telemetry: dict | None,
+    message_id: uuid.UUID | None = None,
+    latency_ms: int | None = None,
+    error: str | None = None,
+) -> None:
+    """Persist one AiCallLog row for a completed chat turn (FR-1000).
+
+    Turns the Phase 2 structured log line (provider/latency/tokens) and the
+    Phase 5 flags (guardrails, citation integrity) into queryable telemetry.
+    Token counts and latency stay null when the provider did not report them
+    or the degraded fallback answered instead.
+    """
+    telemetry = telemetry or {}
+    prompt_tokens = telemetry.get("prompt_tokens")
+    completion_tokens = telemetry.get("completion_tokens")
+    provider = telemetry.get("provider")
+    model = telemetry.get("model")
+    call_latency = telemetry.get("latency_ms") or latency_ms
+
+    log = AiCallLog(
+        organization_id=conversation.organization_id,
+        workspace_id=conversation.workspace_id,
+        conversation_id=conversation.id,
+        message_id=message_id,
+        user_id=user_id,
+        provider=provider,
+        model=model,
+        latency_ms=int(call_latency) if call_latency is not None else None,
+        prompt_tokens=int(prompt_tokens) if prompt_tokens is not None else None,
+        completion_tokens=int(completion_tokens) if completion_tokens is not None else None,
+        total_tokens=int(telemetry["total_tokens"])
+        if telemetry.get("total_tokens") is not None
+        else None,
+        degraded=bool(result.get("degraded")),
+        guardrail_triggered=bool(result.get("guardrail_flags")),
+        citations_dropped=bool(result.get("citations_unverified")),
+        cost_estimate=estimate_call_cost(
+            provider, model, prompt_tokens, completion_tokens
+        ),
+        error=error,
+    )
+    db.add(log)
+    await db.commit()
 
 
 # ── REST Endpoints ───────────────────────────────────────────────────────────
@@ -312,15 +366,26 @@ async def chat_sync(
     state = _build_initial_state(req, organization_id, messages)
 
     await _append_message(db, conversation.id, "user", req.message)
+    start = time.perf_counter()
     try:
         result = await graph.ainvoke(state)
     except Exception:
         db.rollback()
         raise
     reply = result.get("final_answer") or "No answer generated."
-    await _append_message(db, conversation.id, "assistant", reply)
+    assistant_message = await _append_message(db, conversation.id, "assistant", reply)
     await _record_guardrail_audits(
         db, current_user, conversation, req.workspace_id, organization_id, result
+    )
+    total_latency = round((time.perf_counter() - start) * 1000, 2)
+    await _write_ai_call_log(
+        db,
+        user_id=current_user.id,
+        conversation=conversation,
+        result=result,
+        telemetry=result.get("llm_telemetry"),
+        message_id=assistant_message.id,
+        latency_ms=total_latency,
     )
 
     return ChatResponse(
@@ -363,6 +428,7 @@ async def chat_stream(
     async def event_generator():
         final_answer: str | None = None
         final_output: dict | None = None
+        start = time.perf_counter()
         try:
             async for event in graph.astream_events(state, version="v2"):
                 kind = event.get("event")
@@ -419,7 +485,7 @@ async def chat_stream(
                             }
         finally:
             if final_answer:
-                await _append_message(db, conversation.id, "assistant", final_answer)
+                assistant_message = await _append_message(db, conversation.id, "assistant", final_answer)
                 await _record_guardrail_audits(
                     db,
                     current_user,
@@ -427,6 +493,16 @@ async def chat_stream(
                     req.workspace_id,
                     organization_id,
                     final_output or {},
+                )
+                total_latency = round((time.perf_counter() - start) * 1000, 2)
+                await _write_ai_call_log(
+                    db,
+                    user_id=current_user.id,
+                    conversation=conversation,
+                    result=final_output or {},
+                    telemetry=(final_output or {}).get("llm_telemetry"),
+                    message_id=assistant_message.id,
+                    latency_ms=total_latency,
                 )
 
         yield {"event": "done", "data": ""}
