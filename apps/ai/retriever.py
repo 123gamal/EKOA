@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from functools import lru_cache
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qdrant_models
@@ -15,6 +16,14 @@ from ekoa_config.settings import get_settings
 
 settings = get_settings()
 logger = get_logger("ai.retriever")
+
+# SentenceTransformer.encode() is not safe to call concurrently from multiple
+# threads: the underlying HuggingFace tokenizers library runs its own internal
+# thread pool and can deadlock when invoked from several Python threads at
+# once (the well-known TOKENIZERS_PARALLELISM issue). Since retrieve_chunks is
+# now dispatched via asyncio.to_thread and can genuinely run concurrently
+# across requests, serialize access to the shared embedder instance.
+_embed_lock = threading.Lock()
 
 # Redis is a pure optimization here: query embeddings and search results are
 # cached, but any Redis error falls through to computing normally rather than
@@ -45,7 +54,8 @@ def _embed_query_cached(query: str) -> list[float]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("embedding_cache_read_failed", extra={"error": str(exc)})
 
-    vector = _get_embedder().encode([query], show_progress_bar=False)[0].tolist()
+    with _embed_lock:
+        vector = _get_embedder().encode([query], show_progress_bar=False)[0].tolist()
 
     try:
         get_sync_redis().set(cache_key, json.dumps(vector), ex=_EMBEDDING_CACHE_TTL_SECONDS)

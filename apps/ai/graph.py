@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from datetime import datetime, timezone
@@ -44,6 +45,7 @@ class AgentState(TypedDict):
     citations: list[str]
     citations_unverified: bool
     llm_telemetry: dict
+    retrieval_latency_ms: int | None
 
 
 # ── Agent Node Implementations ───────────────────────────────────────────────
@@ -157,13 +159,24 @@ def coordinator_node(state: AgentState) -> dict:
     }
 
 
-def retriever_node(state: AgentState) -> dict:
-    """Query Qdrant vector store for relevant chunks."""
+async def retriever_node(state: AgentState) -> dict:
+    """Query Qdrant vector store for relevant chunks.
+
+    ``retrieve_chunks`` is synchronous and does real CPU-bound work
+    (SentenceTransformer embedding) plus a blocking Qdrant network call.
+    Run it in a thread so it doesn't block the event loop that every other
+    concurrent request's coroutine also depends on — see Phase 12's
+    latency investigation (docs/performance-and-nfrs.md) for why this
+    mattered: without the offload, one slow request head-of-line-blocks
+    every other request on the same AI service process.
+    """
     user_msg = state["messages"][-1]["content"] if state["messages"] else ""
 
     action_input = {"query": user_msg, "collection": state.get("collection_name", "ekoa_default")}
+    start = time.perf_counter()
     try:
-        chunks = retrieve_chunks(
+        chunks = await asyncio.to_thread(
+            retrieve_chunks,
             query=user_msg,
             collection_name=state.get("collection_name", "ekoa_default"),
             organization_id=state.get("organization_id"),
@@ -173,6 +186,7 @@ def retriever_node(state: AgentState) -> dict:
     except Exception as e:
         chunks = []
         action_output = f"Retrieval failed: {e}"
+    retrieval_latency_ms = round((time.perf_counter() - start) * 1000)
 
     action: AgentAction = {
         "tool_name": "retriever.search",
@@ -183,6 +197,7 @@ def retriever_node(state: AgentState) -> dict:
 
     return {
         "context_chunks": chunks,
+        "retrieval_latency_ms": retrieval_latency_ms,
         "actions": state["actions"] + [action],
     }
 
@@ -402,15 +417,20 @@ def validate_citations(citations: list[str], context_chunks: list[dict]) -> tupl
     return verified, dropped
 
 
-def synthesize_node(state: AgentState) -> dict:
-    """Synthesize the final answer from all agent outputs and context."""
+async def synthesize_node(state: AgentState) -> dict:
+    """Synthesize the final answer from all agent outputs and context.
+
+    ``_call_llm`` uses synchronous provider SDKs (OpenAI/google.generativeai)
+    and makes a real blocking HTTP round-trip — offloaded to a thread for the
+    same reason as ``retriever_node`` (see its docstring).
+    """
     chunks = state.get("context_chunks", [])
 
     context = None
     if chunks:
         context = "\n\n".join(c["text"] for c in chunks if c.get("text"))
 
-    answer, degraded, telemetry = _call_llm(state["messages"], context)
+    answer, degraded, telemetry = await asyncio.to_thread(_call_llm, state["messages"], context)
 
     # Citation integrity: verify the model's cited document IDs against the
     # chunks actually retrieved for this query before anything is sent back.

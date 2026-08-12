@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import uuid
@@ -199,6 +200,7 @@ def _build_initial_state(
         "citations": [],
         "citations_unverified": False,
         "llm_telemetry": {},
+        "retrieval_latency_ms": None,
     }
 
 
@@ -288,6 +290,7 @@ async def _write_ai_call_log(
         provider=provider,
         model=model,
         latency_ms=int(call_latency) if call_latency is not None else None,
+        retrieval_latency_ms=result.get("retrieval_latency_ms"),
         prompt_tokens=int(prompt_tokens) if prompt_tokens is not None else None,
         completion_tokens=int(completion_tokens) if completion_tokens is not None else None,
         total_tokens=int(telemetry["total_tokens"])
@@ -326,7 +329,7 @@ async def health_check():
 
     try:
         from apps.ai.retriever import _get_qdrant
-        _get_qdrant().get_collections()
+        await asyncio.to_thread(lambda: _get_qdrant().get_collections())
         dependencies["qdrant"] = "ok"
     except Exception as exc:  # noqa: BLE001
         dependencies["qdrant"] = f"error: {type(exc).__name__}"

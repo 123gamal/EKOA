@@ -43,6 +43,10 @@ class AiCallLog(Base, TimestampMixin):
     provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Embedding + Qdrant search time only, separate from latency_ms (LLM-only)
+    # — added Phase 12 to make the two dominant cost centers of a chat turn
+    # distinguishable without re-deriving them from raw logs.
+    retrieval_latency_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     prompt_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     total_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

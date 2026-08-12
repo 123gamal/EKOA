@@ -148,6 +148,10 @@ services:
       QDRANT_HOST: qdrant
       CORS_ORIGINS: '["http://localhost:3000"]'
       DEBUG: "true"
+      # Phase 12: retriever_node now runs concurrently across requests via
+      # asyncio.to_thread; disable the tokenizers library's own internal
+      # thread pool to avoid the known concurrent-encode() deadlock.
+      TOKENIZERS_PARALLELISM: "false"
     depends_on:
       qdrant:
         condition: service_healthy
@@ -164,8 +168,13 @@ services:
     deploy:
       resources:
         limits:
+          # Phase 12: raised from 1.0. With the event-loop-blocking fix in
+          # apps/ai/graph.py (retriever_node/synthesize_node now offload to a
+          # thread pool), concurrent requests actually contend for real CPU
+          # during the SentenceTransformer embedding step — give that
+          # headroom instead of time-slicing a single core.
           memory: 1g
-          cpus: "1.0"
+          cpus: "2.0"
     networks:
       - ekoa-network
 

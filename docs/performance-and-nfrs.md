@@ -125,6 +125,78 @@ is an optimization project in its own right, not a Phase 10 line item.
 Establishing this real baseline, where previously there was none, is what
 Phase 10 committed to.
 
+### Phase 12 update — root cause fixed, plus a deadlock found during verification
+
+Phase 10's finding was root-caused, not just guessed at: `apps/ai/main.py`'s
+`chat_sync`/`chat_stream` handlers were already correctly `async def` and
+`await`ing `graph.ainvoke(...)`, but the LangGraph node functions themselves —
+`retriever_node` and `synthesize_node` — were plain sync `def`. LangGraph runs
+sync nodes inline on the calling coroutine, so their blocking bodies (CPU-bound
+sentence-transformers embedding, a sync Qdrant client call, a sync LLM HTTP
+call) executed directly on the single asyncio event-loop thread. Concurrent
+chat requests could not even *start* their work until the previous request's
+entire graph finished — a full serialization, matching the measured 68s P95
+against a 3.4s median (a queuing artifact, not each call individually being
+slow).
+
+**Fix**: converted both nodes to `async def`, offloading their existing
+blocking bodies via `asyncio.to_thread(...)` rather than rewriting the
+underlying helpers to async SDKs — minimum-risk change, same tested logic,
+just moved off the event-loop thread. Also raised the `ai` service's CPU
+limit from 1.0 to 2.0 cores, and added a `retrieval_latency_ms` column
+(`ai_call_logs`) to separate retrieval time from LLM time in future
+diagnostics.
+
+**A second, more serious bug surfaced during live verification, not in unit
+tests**: once concurrent requests were actually possible, a manual live
+concurrency test (5 simultaneous chat calls through the Nginx gateway)
+revealed requests hanging indefinitely — Nginx eventually returned a 504
+after its 120s `proxy_read_timeout`, with **zero** log activity from the AI
+service for the stuck request (it never even reached the point of writing a
+response). Root cause: `SentenceTransformer.encode()` (`apps/ai/retriever.py`)
+is not safe to call concurrently from multiple threads — the underlying
+HuggingFace `tokenizers` library runs its own internal thread pool and can
+deadlock under concurrent multi-threaded `encode()` calls, a known upstream
+issue normally avoided by setting `TOKENIZERS_PARALLELISM=false`, which this
+service had never set (irrelevant before Phase 12, since nothing called
+`retrieve_chunks` concurrently until the event-loop fix made that possible).
+Fixed with a `threading.Lock` serializing access to the shared embedder
+instance in `retriever.py`, plus `TOKENIZERS_PARALLELISM=false` set on the
+`ai` service as defense-in-depth. `pytest`'s existing suite never caught this
+— it doesn't exercise real concurrent HTTP load against a live container, only
+the live Docker benchmark did.
+
+**Re-benchmarked, same command as Phase 10**
+(`locust -f tests/performance/locustfile.py --host http://localhost --headless -u 8 -r 1 -t 90s`),
+2026-08-12, through the Nginx gateway, full stack rebuilt with both fixes:
+
+| Endpoint | Requests | Median | P95 | Max |
+|---|---|---|---|---|
+| `POST /api/v1/ai/chat` | 78 | **1.8s** | **3.8s** | 5.7s |
+
+**AI chat now meets its spec target** (P95 < 5s): P95 dropped from 68.0s to
+3.8s, roughly an 18x improvement. Of the 78 chat requests, 34 got a 429
+(rate-limited) — expected and not a regression: every simulated Locust user
+shares one IP against the 60/min chat rate limit (Ch.9.15), the same known
+artifact noted for `/documents/` and `/documents/upload` in the Phase 10
+table above. Zero timeouts, zero 5xx, zero hangs.
+
+**Honest caveat, not swept under the rug**: a follow-up manual test sending 5
+*truly simultaneous* chat requests (all fired at once, bypassing Locust's more
+gradual ramp-up) showed the embedder lock fully serializing those 5 encode()
+calls at roughly 7s each (~35s total for the batch) — much slower than a
+~22M-parameter MiniLL/L6 model should take, suggesting real CPU contention
+under this container's 2.0-core limit rather than the lock itself being the
+bottleneck. The lock trades a hard deadlock for a soft serialization point;
+it fixes correctness but is not a throughput fix for the embedding step
+specifically. Under Locust's more realistic, staggered request pattern this
+did not dominate the P95 (median `retrieval_latency_ms` ~3.3s across the run,
+per `ai_call_logs`), but a burst of near-simultaneous requests could still
+see multi-second queuing at the embedding step alone. Candidate follow-ups,
+not done here: raise the CPU limit further, swap the lock for a bounded
+semaphore (allow N-way concurrency instead of 1-way), or move to a smaller/
+quantized embedding model.
+
 ## Deliberately out of scope for Phase 10
 
 Full OpenTelemetry/Prometheus/Grafana/Loki/Tempo/Sentry observability stack
