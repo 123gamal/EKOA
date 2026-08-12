@@ -200,6 +200,38 @@ export interface Connector {
   updated_at: string;
 }
 
+export interface OrgMemberRecord {
+  user_id: string;
+  email: string;
+  full_name: string;
+  role: "owner" | "admin" | "member";
+  joined_at: string;
+}
+
+export interface OrgInviteRecord {
+  id: string;
+  organization_id: string;
+  email: string;
+  role: string;
+  status: "pending" | "accepted" | "revoked";
+  invited_by: string;
+  expires_at: string;
+  accepted_at?: string | null;
+  created_at: string;
+}
+
+export interface ActivityEntry {
+  id: string;
+  user_id?: string | null;
+  actor_name?: string | null;
+  actor_email?: string | null;
+  action: string;
+  resource_type?: string | null;
+  resource_id?: string | null;
+  details?: Record<string, unknown> | null;
+  created_at: string;
+}
+
 export interface ConnectorHealth {
   id: string;
   provider: string;
@@ -355,6 +387,59 @@ export const orgApi = {
   async getBySlug(slug: string): Promise<Organization> {
     const res = await apiFetch(`/organizations/${slug}`);
     if (!res.ok) throw new Error("Organization not found");
+    return res.json();
+  },
+};
+
+export const teamApi = {
+  async listMembers(orgId: string, page = 1, pageSize = 50): Promise<Paginated<OrgMemberRecord>> {
+    const res = await apiFetch(`/organizations/${orgId}/members?page=${page}&page_size=${pageSize}`);
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to list members"));
+    return res.json();
+  },
+  async updateMemberRole(orgId: string, userId: string, role: "admin" | "member"): Promise<OrgMemberRecord> {
+    const res = await apiFetch(`/organizations/${orgId}/members/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    });
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to update member role"));
+    return res.json();
+  },
+  async removeMember(orgId: string, userId: string): Promise<void> {
+    const res = await apiFetch(`/organizations/${orgId}/members/${userId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to remove member"));
+  },
+  async listInvites(orgId: string): Promise<Paginated<OrgInviteRecord>> {
+    const res = await apiFetch(`/organizations/${orgId}/invites`);
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to list invites"));
+    return res.json();
+  },
+  async createInvite(orgId: string, email: string, role: "admin" | "member"): Promise<OrgInviteRecord> {
+    const res = await apiFetch(`/organizations/${orgId}/invites`, {
+      method: "POST",
+      body: JSON.stringify({ email, role }),
+    });
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to send invite"));
+    return res.json();
+  },
+  async revokeInvite(orgId: string, inviteId: string): Promise<void> {
+    const res = await apiFetch(`/organizations/${orgId}/invites/${inviteId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to revoke invite"));
+  },
+  async acceptInvite(token: string): Promise<OrgInviteRecord> {
+    const res = await apiFetch("/invites/accept", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to accept invite"));
+    return res.json();
+  },
+};
+
+export const activityApi = {
+  async list(orgId: string, page = 1, pageSize = 25): Promise<Paginated<ActivityEntry>> {
+    const res = await apiFetch(`/organizations/${orgId}/activity?page=${page}&page_size=${pageSize}`);
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to load activity"));
     return res.json();
   },
 };

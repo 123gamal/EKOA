@@ -13,6 +13,8 @@ from apps.api.models.document_version import DocumentVersion
 from apps.api.models.connector import Connector, ConnectorCredential
 from apps.api.models.mcp_api_key import McpApiKey
 from apps.api.models.ai_call_log import AiCallLog
+from apps.api.models.org_invite import OrgInvite
+from apps.api.models.workspace_member import WorkspaceMember
 
 __all__ = [
     "User",
@@ -31,4 +33,6 @@ __all__ = [
     "ConnectorCredential",
     "McpApiKey",
     "AiCallLog",
+    "OrgInvite",
+    "WorkspaceMember",
 ]

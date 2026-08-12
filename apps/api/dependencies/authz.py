@@ -13,6 +13,7 @@ from apps.api.models.user import User
 from apps.api.models.org_member import OrgMember
 from apps.api.models.organization import Organization
 from apps.api.models.workspace import Workspace
+from apps.api.models.workspace_member import WorkspaceMember
 from apps.api.models.document import Document
 
 # Sentinel used so these helpers can be composed via Depends() without a trailing
@@ -116,6 +117,49 @@ async def assert_org_membership(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this organization",
+        )
+
+
+async def get_workspace_role(
+    db: AsyncSession, user_id: uuid.UUID, workspace_id: uuid.UUID, org_id: uuid.UUID
+) -> str | None:
+    """Return the caller's effective role *within this workspace* (Phase 13).
+
+    Additive on top of org-level membership: if a :class:`WorkspaceMember`
+    row exists for this (user, workspace) it wins (an explicit per-workspace
+    override, e.g. workspace-admin without org-admin); otherwise this falls
+    back to the user's org role, so a workspace with no overrides behaves
+    exactly as it did before this existed. Most routes still use
+    ``get_org_role``/``assert_min_role`` directly and never consult this —
+    see ``workspaces.py``'s delete route for the one place it's enforced so
+    far.
+    """
+    stmt = select(WorkspaceMember.role).where(
+        WorkspaceMember.workspace_id == workspace_id,
+        WorkspaceMember.user_id == user_id,
+    )
+    override = (await db.execute(stmt)).scalar_one_or_none()
+    if override is not None:
+        return override
+    return await get_org_role(db, user_id, org_id)
+
+
+async def assert_workspace_min_role(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    org_id: uuid.UUID,
+    min_role: str,
+) -> None:
+    """Raise 403 unless the caller's effective workspace role meets ``min_role``."""
+    if min_role not in ROLE_LEVELS:
+        raise ValueError(f"Unknown role: {min_role!r}")
+
+    role = await get_workspace_role(db, user_id, workspace_id, org_id)
+    if role is None or ROLE_LEVELS.get(role, 0) < ROLE_LEVELS[min_role]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to perform this action",
         )
 
 

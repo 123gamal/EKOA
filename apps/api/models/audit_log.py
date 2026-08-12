@@ -12,6 +12,10 @@ class AuditLog(Base, TimestampMixin):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Nullable + added in Phase 13: only rows written since then (from routes
+    # that pass it) are org-scoped; used by the team activity feed to avoid
+    # cross-tenant leakage. Older/internal-only rows are simply excluded.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     action: Mapped[str] = mapped_column(String(100), nullable=False)  # e.g. "auth.login", "document.upload"
     resource_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     resource_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)

@@ -97,6 +97,7 @@ async def create_mcp_api_key(
             "key_prefix": api_key.key_prefix,
             "expires_at": api_key.expires_at.isoformat() if api_key.expires_at else None,
         },
+        organization_id=org_id,
     )
     logger.info(
         "mcp_api_key_created",
@@ -200,6 +201,7 @@ async def revoke_mcp_api_key(
             "organization_id": str(api_key.organization_id),
             "key_prefix": api_key.key_prefix,
         },
+        organization_id=org_id,
     )
     logger.info(
         "mcp_api_key_revoked",
@@ -271,6 +273,7 @@ async def rotate_mcp_api_key(
             "organization_id": str(new_key.organization_id),
             "key_prefix": new_key.key_prefix,
         },
+        organization_id=org_id,
     )
     logger.info(
         "mcp_api_key_rotated",

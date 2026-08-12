@@ -166,10 +166,11 @@ async def test_chat_unknown_conversation_404(ai_env):
     assert resp.status_code == 404
 
 
-async def test_messages_endpoint_scoped_to_owner(ai_env, db_session):
+async def test_conversations_shared_within_workspace(ai_env, db_session):
+    """Phase 13: conversations are shared with every member of the workspace,
+    not just their creator — this supersedes the old per-owner scoping."""
     client, user, workspace, _fake = ai_env
 
-    # A second user's conversation in the same workspace must be invisible.
     other = User(
         email=f"ai-other-{uuid.uuid4().hex[:10]}@example.com",
         full_name="Other",
@@ -188,13 +189,44 @@ async def test_messages_endpoint_scoped_to_owner(ai_env, db_session):
     db_session.add(other_conv)
     await db_session.commit()
 
+    # A teammate's conversation in the same (accessible) workspace is visible.
     resp = await client.get(f"/api/v1/ai/conversations/{other_conv.id}/messages")
-    assert resp.status_code == 404
+    assert resp.status_code == 200
 
-    # Own conversations list only contains the caller's rows.
     resp = await client.get(f"/api/v1/ai/conversations?workspace_id={workspace.id}")
     assert resp.status_code == 200
-    assert all(item["user_id"] == str(user.id) for item in resp.json()["items"])
+    items = resp.json()["items"]
+    assert any(item["id"] == str(other_conv.id) for item in items)
+    assert any(item["owner_name"] == "Other" for item in items)
+
+
+async def test_conversation_not_visible_outside_accessible_workspace(ai_env, db_session):
+    """A conversation in a workspace the caller can't access is still rejected."""
+    client, user, _workspace, _fake = ai_env
+
+    from apps.api.models.organization import Organization
+    from apps.api.models.workspace import Workspace
+    from apps.api.models.conversation import Conversation
+
+    other_org = Organization(
+        name="Other Org", slug=f"other-org-{uuid.uuid4().hex[:8]}", owner_id=user.id
+    )
+    db_session.add(other_org)
+    await db_session.flush()
+    other_ws = Workspace(name="Other WS", organization_id=other_org.id, created_by=user.id)
+    db_session.add(other_ws)
+    await db_session.flush()
+    foreign_conv = Conversation(
+        title="foreign",
+        workspace_id=other_ws.id,
+        organization_id=other_org.id,
+        user_id=user.id,
+    )
+    db_session.add(foreign_conv)
+    await db_session.commit()
+
+    resp = await client.get(f"/api/v1/ai/conversations/{foreign_conv.id}/messages")
+    assert resp.status_code == 403
 
 
 # ── Document versioning ──────────────────────────────────────────────────────

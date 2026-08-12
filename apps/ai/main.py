@@ -135,12 +135,15 @@ async def _get_or_create_conversation(
     conversation_id: str | None,
     message: str,
 ) -> Conversation:
-    """Create a conversation on first message, or load the caller's existing one.
+    """Create a conversation on first message, or load an existing one.
 
     The conversation is created on the first message if the client does not
     supply a ``conversation_id``; afterwards the client echoes the returned
-    id. A supplied id that is not the caller's conversation in the requested
-    workspace is rejected with 404 (no cross-user/tenant disclosure).
+    id. Conversations are shared within a workspace (Phase 13): any user who
+    can access the workspace may continue any conversation in it, not just
+    its creator. A supplied id outside the requested workspace, or in a
+    workspace the caller can't access, is rejected with 404 (no cross-tenant
+    disclosure).
     """
     if conversation_id is None:
         org_id = await _resolve_org_id(db, workspace_id)
@@ -169,13 +172,13 @@ async def _get_or_create_conversation(
             detail="Invalid conversation_id",
         )
 
+    # Workspace access (shared by every member, per Phase 13) is already
+    # asserted by the caller before this function runs; ownership is no
+    # longer the gate — any workspace member may continue any conversation
+    # in it.
     stmt = select(Conversation).where(Conversation.id == conv_uuid)
     conversation = (await db.execute(stmt)).scalar_one_or_none()
-    if (
-        conversation is None
-        or conversation.user_id != user.id
-        or str(conversation.workspace_id) != workspace_id
-    ):
+    if conversation is None or str(conversation.workspace_id) != workspace_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found",
@@ -528,7 +531,7 @@ async def list_conversations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List the current user's conversations in a workspace (paginated, latest first)."""
+    """List conversations in a workspace, shared across every member who can access it (Phase 13)."""
     await assert_workspace_access_for_user(current_user, workspace_id, db)
     try:
         ws_uuid = uuid.UUID(workspace_id)
@@ -538,9 +541,10 @@ async def list_conversations(
             detail="Invalid workspace_id",
         )
 
-    base = select(Conversation).where(
-        Conversation.workspace_id == ws_uuid,
-        Conversation.user_id == current_user.id,
+    base = (
+        select(Conversation, User)
+        .join(User, User.id == Conversation.user_id)
+        .where(Conversation.workspace_id == ws_uuid)
     )
     total = (
         await db.execute(select(func.count()).select_from(base.subquery()))
@@ -551,7 +555,13 @@ async def list_conversations(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
-    items = list((await db.execute(stmt)).scalars().all())
+    rows = (await db.execute(stmt)).all()
+    items = [
+        ConversationResponse.model_validate(conversation).model_copy(
+            update={"owner_name": owner.full_name}
+        )
+        for conversation, owner in rows
+    ]
     return Paginated.create(items, total, page, page_size)
 
 
@@ -563,7 +573,7 @@ async def list_messages(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List persisted messages for one of the caller's conversations (paginated, oldest first)."""
+    """List persisted messages for a conversation in a workspace the caller can access (paginated, oldest first)."""
     try:
         conv_uuid = uuid.UUID(conversation_id)
     except ValueError:
@@ -574,11 +584,14 @@ async def list_messages(
 
     stmt = select(Conversation).where(Conversation.id == conv_uuid)
     conversation = (await db.execute(stmt)).scalar_one_or_none()
-    if conversation is None or conversation.user_id != current_user.id:
+    if conversation is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Conversation not found",
         )
+    # Shared conversations (Phase 13): authorization is workspace membership,
+    # not who created the conversation.
+    await assert_workspace_access_for_user(current_user, str(conversation.workspace_id), db)
 
     base = select(Message).where(Message.conversation_id == conversation.id)
     total = (

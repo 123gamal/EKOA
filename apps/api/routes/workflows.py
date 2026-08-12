@@ -93,7 +93,8 @@ async def create_workflow(
         action="workflow.create",
         resource_type="workflows",
         resource_id=workflow.id,
-        details={"name": workflow.name, "template_id": workflow.template_id, "workspace_id": str(workflow.workspace_id)}
+        details={"name": workflow.name, "template_id": workflow.template_id, "workspace_id": str(workflow.workspace_id)},
+        organization_id=org_id,
     )
     return workflow
 
@@ -176,7 +177,8 @@ async def delete_workflow(
         action="workflow.delete",
         resource_type="workflows",
         resource_id=workflow.id,
-        details={"name": workflow.name, "workspace_id": str(workflow.workspace_id)}
+        details={"name": workflow.name, "workspace_id": str(workflow.workspace_id)},
+        organization_id=org_id,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -221,7 +223,8 @@ async def run_workflow(
         action="workflow.run",
         resource_type="workflow_runs",
         resource_id=run.id,
-        details={"workflow_id": str(workflow.id), "name": workflow.name}
+        details={"workflow_id": str(workflow.id), "name": workflow.name},
+        organization_id=org_id,
     )
 
     try:
@@ -420,6 +423,7 @@ async def approve_run(
             "approval_step_id": run.approval_step_id,
             "reason": reason,
         },
+        organization_id=await authz.org_id_for_workspace(db, workflow.workspace_id),
     )
     logger.info(
         "workflow_run_approved",
@@ -472,6 +476,7 @@ async def reject_run(
             "approval_step_id": run.approval_step_id,
             "reason": reason,
         },
+        organization_id=await authz.org_id_for_workspace(db, workflow.workspace_id),
     )
     logger.warning(
         "workflow_run_rejected",

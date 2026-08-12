@@ -86,6 +86,24 @@ services:
       - ekoa-network
 
   # ---------------------------------------------------------------------------
+  # MailHog – dev-only SMTP catcher for org invite emails (Phase 13)
+  # ---------------------------------------------------------------------------
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: ekoa-mailhog
+    restart: unless-stopped
+    ports:
+      - "${MAILHOG_SMTP_PORT:-1025}:1025"
+      - "${MAILHOG_WEB_PORT:-8025}:8025"
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.25"
+    networks:
+      - ekoa-network
+
+  # ---------------------------------------------------------------------------
   # API – FastAPI REST backend
   # ---------------------------------------------------------------------------
   api:
@@ -106,11 +124,16 @@ services:
       QDRANT_HOST: qdrant
       CORS_ORIGINS: '["http://localhost:3000"]'
       DEBUG: "true"
+      SMTP_HOST: mailhog
+      SMTP_PORT: "1025"
+      FRONTEND_URL: "http://localhost:3000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mailhog:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=5).status==200 else 1)"]
       interval: 15s

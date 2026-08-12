@@ -46,6 +46,7 @@ async def upload_document(
     """Upload a file to a specific workspace. The file metadata is indexed as PENDING."""
     # Verify the current user can access the target workspace
     await authz.assert_can_access_workspace(workspace_id, current_user, db)
+    org_id = await authz.org_id_for_workspace(db, workspace_id)
 
     # Ensure upload directory exists
     os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -107,7 +108,8 @@ async def upload_document(
         action="document.upload",
         resource_type="documents",
         resource_id=document.id,
-        details={"title": document.title, "workspace_id": str(workspace_id)}
+        details={"title": document.title, "workspace_id": str(workspace_id)},
+        organization_id=org_id,
     )
 
     # Enqueue background processing to the Celery worker (which has the
@@ -207,13 +209,15 @@ async def delete_document(
     db.add(document)
     await db.commit()
 
+    org_id = await authz.org_id_for_workspace(db, document.workspace_id)
     await audit_service.log_action(
         db,
         user_id=current_user.id,
         action="document.delete",
         resource_type="documents",
         resource_id=document.id,
-        details={"title": document.title, "workspace_id": str(document.workspace_id)}
+        details={"title": document.title, "workspace_id": str(document.workspace_id)},
+        organization_id=org_id,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

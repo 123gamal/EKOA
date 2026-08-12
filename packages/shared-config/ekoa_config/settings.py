@@ -92,6 +92,21 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
 
+    # ── Email / SMTP (Phase 13 — org invites) ────────────────────────────
+    # Points at a local MailHog catcher by default (see docker-compose.yml)
+    # so invite emails can be sent and inspected in development without a
+    # real provider. Point these at a real SMTP relay in production.
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 1025
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = "no-reply@ekoa.local"
+    SMTP_USE_TLS: bool = False
+
+    # Base URL of the frontend, used to build links embedded in emails (e.g.
+    # the org invite accept link).
+    FRONTEND_URL: str = "http://localhost:3000"
+
     # ── MCP server (Phase 8) ─────────────────────────────────────────────
     # The MCP server exposes two tenant-scoped tools (search_knowledge_base,
     # list_documents) over the Streamable HTTP transport. Clients authenticate
