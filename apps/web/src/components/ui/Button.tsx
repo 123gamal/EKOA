@@ -1,7 +1,10 @@
+"use client";
+
 import { ButtonHTMLAttributes, forwardRef } from "react";
+import { motion, type HTMLMotionProps } from "motion/react";
 import { cn } from "@/lib/utils";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "success";
 type ButtonSize = "sm" | "md" | "lg";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -10,12 +13,12 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary:
-    "bg-gradient-to-r from-[var(--primary)] to-[var(--ring)] text-[var(--primary-foreground)] hover:opacity-90 shadow-sm shadow-indigo-500/25",
+  primary: "gradient-brand glow-shadow text-[var(--primary-foreground)]",
   secondary:
-    "border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)]",
+    "border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] hover:border-[var(--primary)]/40",
   ghost: "hover:bg-[var(--muted)] text-[var(--foreground)]",
-  danger: "bg-red-600 text-white hover:bg-red-700",
+  danger: "bg-[var(--destructive)] text-white hover:opacity-90",
+  success: "bg-[var(--success)] text-white hover:opacity-90",
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -25,16 +28,20 @@ const sizeClasses: Record<ButtonSize, string> = {
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = "primary", size = "md", ...props }, ref) => (
-    <button
+  ({ className, variant = "primary", size = "md", disabled, ...props }, ref) => (
+    <motion.button
       ref={ref}
+      disabled={disabled}
+      whileHover={disabled ? undefined : { scale: 1.02, y: -1 }}
+      whileTap={disabled ? undefined : { scale: 0.98 }}
+      transition={{ duration: 0.15 }}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed",
+        "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
         variantClasses[variant],
         sizeClasses[size],
         className
       )}
-      {...props}
+      {...(props as HTMLMotionProps<"button">)}
     />
   )
 );

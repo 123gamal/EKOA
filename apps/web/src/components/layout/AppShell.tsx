@@ -15,6 +15,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { authApi } from "@/lib/api";
 import { clearTokens, getAccessToken } from "@/lib/auth";
@@ -89,7 +90,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       >
         <div className="flex h-16 items-center justify-between border-b border-[var(--border)] px-4">
           <Link href="/dashboard" className="flex items-center gap-2 font-bold text-lg">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-fuchsia-500 text-white text-sm shadow-md shadow-indigo-500/30">
+            <span className="gradient-brand glow-shadow flex h-8 w-8 items-center justify-center rounded-lg text-white text-sm">
               E
             </span>
             <span>
@@ -118,21 +119,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 href={href}
                 onClick={() => setSidebarOpen(false)}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition",
+                  "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
                   active
-                    ? "bg-gradient-to-r from-[var(--primary)]/15 to-[var(--primary)]/5 text-[var(--primary)] shadow-sm"
+                    ? "text-[var(--primary)]"
                     : "text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
                 )}
               >
-                <Icon
-                  className={cn(
-                    "h-4 w-4 shrink-0",
-                    active && "text-[var(--primary)]"
-                  )}
-                />
-                {label}
                 {active && (
-                  <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--primary)]" />
+                  <motion.span
+                    layoutId="sidebar-active-pill"
+                    transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+                    className="absolute inset-0 rounded-lg bg-gradient-to-r from-[var(--primary)]/15 to-[var(--primary)]/5 shadow-sm"
+                  />
+                )}
+                <Icon className="relative z-10 h-4 w-4 shrink-0" />
+                <span className="relative z-10">{label}</span>
+                {active && (
+                  <span className="relative z-10 ml-auto h-1.5 w-1.5 rounded-full bg-[var(--primary)]" />
                 )}
               </Link>
             );

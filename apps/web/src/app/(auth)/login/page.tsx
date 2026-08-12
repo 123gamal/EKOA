@@ -46,7 +46,7 @@ function LoginForm() {
       <CardContent className="pt-6">
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           <div className="mb-6 text-center">
-            <h1 className="text-2xl font-bold">Sign In</h1>
+            <h1 className="text-gradient-brand text-2xl font-bold">Sign In</h1>
             <p className="mt-1 text-sm text-[var(--muted-foreground)]">
               Enterprise Knowledge Operations Assistant
             </p>
@@ -55,7 +55,7 @@ function LoginForm() {
           {errors.root && (
             <div
               role="alert"
-              className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600 dark:bg-red-950/30 dark:text-red-400"
+              className="rounded-lg bg-[color-mix(in_srgb,var(--destructive)_12%,transparent)] px-4 py-3 text-sm text-[var(--destructive)]"
             >
               {errors.root.message}
             </div>

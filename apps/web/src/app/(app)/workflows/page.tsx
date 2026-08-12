@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { motion } from "motion/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { staggerContainer, staggerItem } from "@/components/ui/motion";
 import {
   GitBranch,
   Play,
@@ -224,8 +226,10 @@ export default function WorkflowsPage() {
 
   const runningStep = (step: WorkflowStepResult, idx: number) => (
     <div key={step.id} className="relative">
-      <div
-        className={`rounded-xl border p-4 transition ${
+      <motion.div
+        layout
+        transition={{ duration: 0.3 }}
+        className={`rounded-xl border p-4 ${
           step.status === "running"
             ? "border-[var(--primary)] bg-[var(--primary)]/10 ring-2 ring-[var(--primary)]/30"
             : step.status === "completed" || step.status === "approved"
@@ -251,7 +255,7 @@ export default function WorkflowsPage() {
             <span className="font-mono text-[var(--muted-foreground)]">{(step.duration_ms / 1000).toFixed(2)}s</span>
           )}
         </div>
-      </div>
+      </motion.div>
       {idx < (activeRun?.steps?.length ?? 0) - 1 && (
         <ArrowRight className="hidden md:block absolute -right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[var(--muted-foreground)] z-10" />
       )}
@@ -305,11 +309,16 @@ export default function WorkflowsPage() {
           <Sparkles className="h-5 w-5 text-amber-500" />
           Workflow Templates
         </h2>
-        <div className="grid gap-4 md:grid-cols-3">
+        <motion.div
+          variants={staggerContainer}
+          initial="initial"
+          animate="animate"
+          className="grid gap-4 md:grid-cols-3"
+        >
           {templates.map((tmpl) => (
+            <motion.div key={tmpl.id} variants={staggerItem}>
             <Card
-              key={tmpl.id}
-              className="flex flex-col transition hover:border-[var(--primary)] hover:shadow-md"
+              className="flex flex-col hover:border-[var(--primary)]"
             >
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
@@ -343,8 +352,9 @@ export default function WorkflowsPage() {
                 </Button>
               </CardContent>
             </Card>
+            </motion.div>
           ))}
-        </div>
+        </motion.div>
       </section>
 
       {/* Create & Run dialog */}

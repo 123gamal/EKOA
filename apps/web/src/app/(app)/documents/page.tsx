@@ -3,6 +3,7 @@
 import { Suspense, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { motion } from "motion/react";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Upload, FileText, Loader2, RefreshCw, CheckCircle2, AlertCircle, Layers } from "lucide-react";
 import { documentApi, type DocumentRecord } from "@/lib/api";
@@ -10,6 +11,7 @@ import { useAllWorkspaces } from "@/lib/queries";
 import { Button } from "@/components/ui/Button";
 import { Badge, statusBadgeVariant } from "@/components/ui/Badge";
 import { Card, CardContent } from "@/components/ui/Card";
+import { staggerContainer, staggerItem } from "@/components/ui/motion";
 
 const POLL_INTERVAL_MS = 4000;
 const PAGE_SIZE = 25;
@@ -226,31 +228,36 @@ function DocumentsContent() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-3">
+            <motion.div variants={staggerContainer} initial="initial" animate="animate" className="space-y-3">
               {docs.map((doc) => (
-                <Card key={doc.id} className="transition hover:shadow-sm">
-                  <CardContent className="flex items-center justify-between py-4">
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-[var(--primary)] shrink-0" />
-                        <h3 className="truncate font-medium">{doc.title}</h3>
+                <motion.div key={doc.id} variants={staggerItem}>
+                  <Card>
+                    <CardContent className="flex items-center justify-between py-4">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-[var(--primary)] shrink-0" />
+                          <h3 className="truncate font-medium">{doc.title}</h3>
+                        </div>
+                        <p className="text-xs text-[var(--muted-foreground)]">
+                          {doc.content_type} &middot; Uploaded {new Date(doc.created_at).toLocaleString()}
+                          {doc.chunk_count != null && doc.chunk_count > 0 && (
+                            <span className="ml-2 font-medium text-[var(--success)]">
+                              &middot; {doc.chunk_count} vector chunks indexed
+                            </span>
+                          )}
+                        </p>
                       </div>
-                      <p className="text-xs text-[var(--muted-foreground)]">
-                        {doc.content_type} &middot; Uploaded {new Date(doc.created_at).toLocaleString()}
-                        {doc.chunk_count != null && doc.chunk_count > 0 && (
-                          <span className="ml-2 font-medium text-emerald-600">
-                            &middot; {doc.chunk_count} vector chunks indexed
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                    <Badge variant={statusBadgeVariant(doc.status)}>
-                      {doc.status}
-                    </Badge>
-                  </CardContent>
-                </Card>
+                      <Badge
+                        variant={statusBadgeVariant(doc.status)}
+                        animated={doc.status === "PROCESSING" || doc.status === "PENDING"}
+                      >
+                        {doc.status}
+                      </Badge>
+                    </CardContent>
+                  </Card>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           )}
           {docs.length > 0 && docs.length < total && (
             <div className="flex justify-center pt-2">

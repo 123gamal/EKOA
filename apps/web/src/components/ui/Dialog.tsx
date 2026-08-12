@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 const FOCUSABLE_SELECTOR =
@@ -78,25 +79,39 @@ export function Dialog({
     };
   }, [open, onClose, dismissible, getFocusable]);
 
-  if (!open) return null;
-
   return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onMouseDown={(e) => {
-        if (dismissible && e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className={cn("w-full max-w-md rounded-xl bg-[var(--card)] text-[var(--card-foreground)] shadow-xl", className)}
-      >
-        {children}
-      </div>
-    </div>,
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          key="dialog-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onMouseDown={(e) => {
+            if (dismissible && e.target === e.currentTarget) onClose();
+          }}
+        >
+          <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className={cn(
+              "glass-card w-full max-w-md rounded-xl text-[var(--card-foreground)] shadow-xl",
+              className
+            )}
+          >
+            {children}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
     document.body
   );
 }

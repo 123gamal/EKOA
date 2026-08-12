@@ -53,13 +53,13 @@ export function ApprovalPanel({
           {...register("reason")}
         />
         <div className="flex gap-2 pt-1">
-          <Button type="submit" disabled={isSubmitting}>
+          <Button type="submit" variant="success" disabled={isSubmitting}>
             <CheckCircle2 className="h-4 w-4" />
             Approve
           </Button>
           <Button
             type="button"
-            variant="secondary"
+            variant="danger"
             disabled={isSubmitting}
             onClick={() => onReject({ reason: getValues("reason") || "" })}
           >

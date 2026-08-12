@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { motion } from "motion/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, FolderOpen, MessageSquare, FileText } from "lucide-react";
 import { orgApi, workspaceApi } from "@/lib/api";
@@ -9,6 +10,7 @@ import { slugify } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
+import { staggerContainer, staggerItem } from "@/components/ui/motion";
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
@@ -175,12 +177,19 @@ export default function DashboardPage() {
       {orgs.length > 0 && (
         <section>
           <h2 className="mb-4 text-lg font-semibold">Organizations</h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <motion.div
+            variants={staggerContainer}
+            initial="initial"
+            animate="animate"
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+          >
             {orgs.map((org) => (
-              <button
+              <motion.button
                 key={org.id}
+                variants={staggerItem}
+                whileHover={{ y: -2 }}
                 onClick={() => setSelectedOrg(org.id)}
-                className={`rounded-xl border p-4 text-left transition ${
+                className={`rounded-xl border p-4 text-left transition-colors ${
                   selectedOrg === org.id
                     ? "border-[var(--primary)] bg-[var(--primary)]/5"
                     : "border-[var(--border)] hover:bg-[var(--muted)]"
@@ -188,9 +197,9 @@ export default function DashboardPage() {
               >
                 <h3 className="font-medium">{org.name}</h3>
                 <p className="text-sm text-[var(--muted-foreground)]">{org.slug}</p>
-              </button>
+              </motion.button>
             ))}
-          </div>
+          </motion.div>
         </section>
       )}
 
@@ -244,9 +253,15 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <motion.div
+              variants={staggerContainer}
+              initial="initial"
+              animate="animate"
+              className="grid gap-4 sm:grid-cols-2"
+            >
               {workspaces.map((ws) => (
-                <Card key={ws.id}>
+                <motion.div key={ws.id} variants={staggerItem}>
+                <Card>
                   <CardContent className="pt-4">
                     <h3 className="font-medium">{ws.name}</h3>
                     <p className="mb-4 text-sm text-[var(--muted-foreground)]">
@@ -268,8 +283,9 @@ export default function DashboardPage() {
                     </div>
                   </CardContent>
                 </Card>
+                </motion.div>
               ))}
-            </div>
+            </motion.div>
           )}
         </section>
       )}

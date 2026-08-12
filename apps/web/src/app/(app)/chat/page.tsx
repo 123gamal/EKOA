@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { AnimatePresence, motion } from "motion/react";
 import { Bot, User, Send, Loader2, Sparkles, FileText, Compass, Layers } from "lucide-react";
 import { getAccessToken } from "@/lib/auth";
 import { consumeSSE } from "@/lib/sse";
@@ -212,8 +213,11 @@ function ChatContent() {
             )}
 
             {messages.map((msg, i) => (
-              <div
+              <motion.div
                 key={i}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
                 className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}
               >
                 <div
@@ -253,7 +257,7 @@ function ChatContent() {
                     </div>
                   )}
                 </div>
-              </div>
+              </motion.div>
             ))}
 
             {agents.length > 0 && (

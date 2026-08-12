@@ -1,10 +1,14 @@
+"use client";
+
 import Link from "next/link";
+import { motion } from "motion/react";
 import {
   Brain,
   FileSearch,
   Shield,
   Zap,
 } from "lucide-react";
+import { staggerContainer, staggerItem } from "@/components/ui/motion";
 
 const features = [
   {
@@ -39,7 +43,7 @@ export default function HomePage() {
       <header className="border-b border-[var(--border)]">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-2 font-bold text-lg">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] text-sm">
+            <span className="gradient-brand glow-shadow flex h-8 w-8 items-center justify-center rounded-lg text-white text-sm">
               E
             </span>
             EKOA
@@ -47,13 +51,13 @@ export default function HomePage() {
           <div className="flex gap-3">
             <Link
               href="/login"
-              className="rounded-lg px-4 py-2 text-sm font-medium hover:bg-[var(--muted)]"
+              className="rounded-lg px-4 py-2 text-sm font-medium transition-colors hover:bg-[var(--muted)]"
             >
               Sign In
             </Link>
             <Link
               href="/register"
-              className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-medium text-[var(--primary-foreground)] hover:opacity-90"
+              className="gradient-brand glow-shadow rounded-lg px-4 py-2 text-sm font-medium text-white transition-transform hover:scale-[1.02]"
             >
               Get Started
             </Link>
@@ -62,11 +66,16 @@ export default function HomePage() {
       </header>
 
       <main>
-        <section className="mx-auto max-w-6xl px-6 py-20 text-center">
+        <motion.section
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="mx-auto max-w-6xl px-6 py-20 text-center"
+        >
           <h1 className="mb-4 text-4xl font-bold tracking-tight sm:text-5xl">
             Enterprise Knowledge
             <br />
-            <span className="text-[var(--primary)]">Operations Assistant</span>
+            <span className="text-gradient-brand">Operations Assistant</span>
           </h1>
           <p className="mx-auto mb-8 max-w-2xl text-lg text-[var(--muted-foreground)]">
             AI-first platform combining RAG, multi-agent orchestration, and
@@ -75,29 +84,40 @@ export default function HomePage() {
           <div className="flex justify-center gap-4">
             <Link
               href="/register"
-              className="rounded-lg bg-[var(--primary)] px-8 py-3 font-medium text-[var(--primary-foreground)] hover:opacity-90"
+              className="gradient-brand glow-shadow rounded-lg px-8 py-3 font-medium text-white transition-transform hover:scale-[1.02]"
             >
               Start Free
             </Link>
             <Link
               href="/login"
-              className="rounded-lg border border-[var(--border)] px-8 py-3 font-medium hover:bg-[var(--muted)]"
+              className="rounded-lg border border-[var(--border)] px-8 py-3 font-medium transition-colors hover:bg-[var(--muted)]"
             >
               Sign In
             </Link>
           </div>
-        </section>
+        </motion.section>
 
         <section className="border-t border-[var(--border)] bg-[var(--muted)]/30 py-16">
-          <div className="mx-auto grid max-w-6xl gap-8 px-6 sm:grid-cols-2 lg:grid-cols-4">
+          <motion.div
+            variants={staggerContainer}
+            initial="initial"
+            whileInView="animate"
+            viewport={{ once: true, amount: 0.3 }}
+            className="mx-auto grid max-w-6xl gap-8 px-6 sm:grid-cols-2 lg:grid-cols-4"
+          >
             {features.map(({ icon: Icon, title, description }) => (
-              <div key={title} className="rounded-xl border border-[var(--border)] bg-[var(--background)] p-6">
+              <motion.div
+                key={title}
+                variants={staggerItem}
+                whileHover={{ y: -4 }}
+                className="glass-card glass-card-hover rounded-xl p-6"
+              >
                 <Icon className="mb-3 h-8 w-8 text-[var(--primary)]" />
                 <h3 className="mb-2 font-semibold">{title}</h3>
                 <p className="text-sm text-[var(--muted-foreground)]">{description}</p>
-              </div>
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         </section>
       </main>
 

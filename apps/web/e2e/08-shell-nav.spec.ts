@@ -14,6 +14,10 @@ const NAV = [
 ];
 
 test("sidebar navigation reaches all six protected routes", async ({ page }) => {
+  // Six sequential page loads, each potentially slow under the backend's
+  // documented concurrency bottleneck — see the timeout comment below.
+  test.setTimeout(120_000);
+
   // Ensure at least one org/workspace exists so Workflows/Analytics render
   // their real content rather than an empty state, regardless of what
   // other spec files have or haven't created yet for the shared user.
@@ -22,7 +26,13 @@ test("sidebar navigation reaches all six protected routes", async ({ page }) => 
 
   for (const { label, heading } of NAV) {
     await page.getByRole("link", { name: label, exact: true }).click();
-    await expect(page.getByRole("heading", { name: heading }).first()).toBeVisible();
+    // Generous timeout: this test runs after the resource-heavy workflow
+    // specs and the backend's documented concurrency bottleneck
+    // (docs/performance-and-nfrs.md) means even unrelated page loads can
+    // queue behind their real LLM calls for a while.
+    await expect(page.getByRole("heading", { name: heading }).first()).toBeVisible({
+      timeout: 30_000,
+    });
   }
 });
 

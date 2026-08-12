@@ -245,7 +245,13 @@ export function GitHubConnectorPanel({ workspaces }: { workspaces: { id: string;
                       {connector.last_sync_status ? (
                         <span className="inline-flex items-center gap-1">
                           <Clock className="h-3 w-3" />
-                          Last sync: <Badge variant={SYNC_VARIANT[connector.last_sync_status] ?? "default"}>{connector.last_sync_status}</Badge>
+                          Last sync:{" "}
+                          <Badge
+                            variant={SYNC_VARIANT[connector.last_sync_status] ?? "default"}
+                            animated={connector.last_sync_status === "running"}
+                          >
+                            {connector.last_sync_status}
+                          </Badge>
                         </span>
                       ) : (
                         "Never synced"

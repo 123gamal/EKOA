@@ -1,43 +1,103 @@
 @import "tailwindcss";
 
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-violet: var(--violet);
+  --color-cyan: var(--cyan);
+
+  --animate-fade-in: fade-in 0.4s ease-out;
+  --animate-slide-up: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-glow-pulse: glow-pulse 2s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes glow-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
 :root {
-  --background: #f5f6fb;
-  --foreground: #161a2b;
+  --background: #f6f7fc;
+  --foreground: #14152b;
   --card: #ffffff;
-  --card-foreground: #161a2b;
-  --primary: #4f46e5;
+  --card-foreground: #14152b;
+  --primary: #6d28d9;
   --primary-foreground: #ffffff;
-  --secondary: #eef2ff;
+  --secondary: #eef1ff;
   --secondary-foreground: #4338ca;
-  --muted: #eef0f6;
-  --muted-foreground: #5b6478;
-  --accent: #e0f2fe;
-  --accent-foreground: #075985;
-  --destructive: #dc2626;
-  --border: #e2e6f0;
-  --ring: #6366f1;
-  --success: #10b981;
-  --warning: #f59e0b;
+  --muted: #eef0f8;
+  --muted-foreground: #5c6178;
+  --accent: #ecfeff;
+  --accent-foreground: #0e7490;
+  --destructive: #e11d48;
+  --border: #e3e5f2;
+  --ring: #4f46e5;
+  --success: #059669;
+  --warning: #d97706;
+  --violet: #7c3aed;
+  --cyan: #06b6d4;
+  --glow: 79 70 229;
 }
 
 .dark {
-  --background: #0b0e1a;
-  --foreground: #e8eaf6;
-  --card: #131731;
-  --card-foreground: #e8eaf6;
-  --primary: #6366f1;
-  --primary-foreground: #ffffff;
-  --secondary: #1e2142;
-  --secondary-foreground: #a5b4fc;
-  --muted: #1a1e3a;
-  --muted-foreground: #98a2c0;
-  --accent: #0c3b55;
-  --accent-foreground: #7dd3fc;
-  --destructive: #ef4444;
-  --border: #232849;
-  --ring: #818cf8;
+  --background: #0a0b18;
+  --foreground: #eceefb;
+  --card: color-mix(in srgb, #171933 88%, transparent);
+  --card-foreground: #eceefb;
+  --primary: #818cf8;
+  --primary-foreground: #0a0b18;
+  --secondary: #1c1f42;
+  --secondary-foreground: #c7d2fe;
+  --muted: #171a35;
+  --muted-foreground: #9aa1c4;
+  --accent: #083344;
+  --accent-foreground: #67e8f9;
+  --destructive: #fb7185;
+  --border: color-mix(in srgb, #818cf8 18%, #232849);
+  --ring: #a5b4fc;
   --success: #34d399;
   --warning: #fbbf24;
+  --violet: #a78bfa;
+  --cyan: #22d3ee;
+  --glow: 129 140 248;
 }
 
 body {
@@ -45,12 +105,57 @@ body {
   color: var(--foreground);
   font-family: system-ui, -apple-system, sans-serif;
   background-image:
-    radial-gradient(1100px 520px at 15% -10%, color-mix(in srgb, var(--primary) 14%, transparent), transparent 60%),
-    radial-gradient(900px 480px at 95% 0%, color-mix(in srgb, #06b6d4 10%, transparent), transparent 55%),
-    radial-gradient(800px 600px at 50% 110%, color-mix(in srgb, #8b5cf6 8%, transparent), transparent 60%);
+    radial-gradient(1100px 520px at 15% -10%, color-mix(in srgb, var(--primary) 20%, transparent), transparent 60%),
+    radial-gradient(900px 480px at 95% 0%, color-mix(in srgb, var(--cyan) 16%, transparent), transparent 55%),
+    radial-gradient(800px 600px at 50% 110%, color-mix(in srgb, var(--violet) 14%, transparent), transparent 60%);
   background-attachment: fixed;
 }
 
 ::selection {
   background: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+/* -----------------------------------------------------------------------
+ * Vibrant SaaS accent utilities — gradients, glass cards, glow.
+ * --------------------------------------------------------------------- */
+
+.gradient-brand {
+  background-image: linear-gradient(135deg, var(--violet) 0%, var(--primary) 50%, var(--cyan) 100%);
+}
+
+.text-gradient-brand {
+  background-image: linear-gradient(135deg, var(--violet), var(--cyan));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.glass-card {
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, rgb(var(--glow)) 8%, transparent) inset,
+    0 8px 30px -12px color-mix(in srgb, rgb(var(--glow)) 35%, transparent);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.glass-card-hover:hover {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, rgb(var(--glow)) 16%, transparent) inset,
+    0 12px 40px -10px color-mix(in srgb, rgb(var(--glow)) 45%, transparent);
+  transform: translateY(-2px);
+}
+
+.glow-shadow {
+  box-shadow: 0 0 20px -4px rgba(var(--glow), 0.5);
+}
+
+.glow-shadow:hover {
+  box-shadow: 0 0 28px -4px rgba(var(--glow), 0.7);
 }

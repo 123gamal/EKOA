@@ -15,8 +15,13 @@ const SENSITIVE_FILE = path.join(process.cwd(), "e2e", "fixtures", "sensitive-po
  */
 async function seedSensitiveDocument(page: Page, workspaceId: string) {
   await page.goto(`/documents?workspace_id=${workspaceId}`);
+  await page.waitForLoadState("networkidle");
   await page.locator('input[type="file"]').setInputFiles(SENSITIVE_FILE);
-  await expect(page.getByText(/uploaded successfully/i)).toBeVisible({ timeout: 15_000 });
+  // Generous timeout: this consistently runs right after a workflow test
+  // that just made several real LLM calls, and the backend's documented
+  // concurrency bottleneck (docs/performance-and-nfrs.md) means requests
+  // unrelated to that prior test can still queue behind it for a while.
+  await expect(page.getByText(/uploaded successfully/i)).toBeVisible({ timeout: 45_000 });
 }
 
 // Per Phase 10's Locust baseline, AI chat completion P95 is ~68s under even
@@ -34,7 +39,10 @@ const RUN_TIMEOUT = 120_000;
  * DOM-nesting assumption that Part B's redesign might change.
  */
 async function createAndRun(page: Page, templateTitleRegex: RegExp) {
-  await expect(page.getByRole("heading", { name: /workflow templates/i })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /workflow templates/i })).toBeVisible({
+    timeout: 30_000,
+  });
   const templateHeadings = page.getByRole("heading", { level: 3 });
   await expect(templateHeadings.first()).toBeVisible();
   const count = await templateHeadings.count();
@@ -55,7 +63,9 @@ async function createAndRun(page: Page, templateTitleRegex: RegExp) {
 }
 
 test.describe("workflow create -> run -> approve/reject lifecycle", () => {
-  test.describe.configure({ timeout: RUN_TIMEOUT + 30_000 });
+  // Headroom for the worst case: seedSensitiveDocument (45s) + createAndRun's
+  // template-load wait (30s) + the RUN_TIMEOUT approval/completion wait.
+  test.describe.configure({ timeout: RUN_TIMEOUT + 90_000 });
 
 
   test("compliance-audit template pauses for approval, and approving resolves it", async ({
