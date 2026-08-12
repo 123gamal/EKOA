@@ -1,0 +1,11 @@
+Internal Data Handling Policy — Draft
+
+For questions about this policy, contact compliance@acmecorp-e2e.com.
+Emergency contact: jane.doe@acmecorp-e2e.com.
+
+This document is a synthetic fixture used by the Playwright E2E suite
+(apps/web/e2e/05-workflows.spec.ts) to exercise the compliance-audit
+workflow's PII/GDPR detector, which scans document text for email
+addresses via a regex pattern. It intentionally contains fake email
+addresses so the detector finds sensitive data and the workflow run
+pauses for human approval, instead of auto-passing on an empty workspace.

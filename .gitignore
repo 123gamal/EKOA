@@ -143,3 +143,17 @@ Desktop.ini
 # -----------------------------------------------------------------------------
 uploads/*
 !uploads/.gitkeep
+
+# -----------------------------------------------------------------------------
+# Local tooling state (not project source)
+# -----------------------------------------------------------------------------
+/.claude/
+
+# -----------------------------------------------------------------------------
+# Playwright E2E (apps/web/e2e/) – anchored, generated-artifact-only.
+# -----------------------------------------------------------------------------
+/apps/web/e2e/.auth/
+/apps/web/e2e/.screenshots/
+/apps/web/playwright-report/
+/apps/web/test-results/
+/locust-smoke*

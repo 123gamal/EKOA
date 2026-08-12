@@ -288,20 +288,46 @@ export async function apiFetch(
   return response;
 }
 
+/**
+ * FastAPI error bodies aren't always `{ detail: string }` — a 422 validation
+ * error returns `detail` as an array of Pydantic error objects
+ * (`{loc, msg, type}[]`). Throwing that raw shape as an Error's message
+ * renders as "[object Object]" in the UI; this normalizes every shape to a
+ * readable string.
+ */
+async function extractErrorDetail(res: Response, fallback: string): Promise<string> {
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return fallback;
+  }
+  const detail = (body as { detail?: unknown } | undefined)?.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    return detail
+      .map((e) =>
+        e && typeof e === "object" && "msg" in e ? String((e as { msg: unknown }).msg) : String(e)
+      )
+      .join("; ");
+  }
+  return fallback;
+}
+
 export const authApi = {
   async register(data: { email: string; password: string; full_name: string }): Promise<UserProfile> {
     const res = await apiFetch("/auth/register", { method: "POST", body: JSON.stringify(data) });
-    if (!res.ok) throw new Error((await res.json()).detail || "Registration failed");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Registration failed"));
     return res.json();
   },
   async login(data: { email: string; password: string }): Promise<TokenPair> {
     const res = await apiFetch("/auth/login", { method: "POST", body: JSON.stringify(data) });
-    if (!res.ok) throw new Error((await res.json()).detail || "Login failed");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Login failed"));
     return res.json();
   },
   async getMe(): Promise<UserProfile> {
     const res = await apiFetch("/auth/me");
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to fetch profile");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to fetch profile"));
     return res.json();
   },
   async me(): Promise<UserProfile> {
@@ -323,7 +349,7 @@ export const orgApi = {
   },
   async create(data: { name: string; slug: string; description?: string }): Promise<Organization> {
     const res = await apiFetch("/organizations/", { method: "POST", body: JSON.stringify(data) });
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to create organization");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to create organization"));
     return res.json();
   },
   async getBySlug(slug: string): Promise<Organization> {
@@ -344,7 +370,7 @@ export const workspaceApi = {
   },
   async create(data: { name: string; description?: string; organization_id: string }): Promise<Workspace> {
     const res = await apiFetch("/workspaces/", { method: "POST", body: JSON.stringify(data) });
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to create workspace");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to create workspace"));
     return res.json();
   },
   async getById(id: string): Promise<Workspace> {
@@ -368,7 +394,7 @@ export const documentApi = {
     formData.append("workspace_id", workspaceId);
     formData.append("file", file);
     const res = await apiFetch("/documents/upload", { method: "POST", body: formData });
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to upload document");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to upload document"));
     return res.json();
   },
 };
@@ -396,7 +422,7 @@ export const workflowApi = {
     workspace_id: string;
   }): Promise<Workflow> {
     const res = await apiFetch("/workflows/", { method: "POST", body: JSON.stringify(data) });
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to create workflow");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to create workflow"));
     return res.json();
   },
   async run(workflowId: string, query?: string): Promise<WorkflowRun> {
@@ -404,7 +430,7 @@ export const workflowApi = {
       method: "POST",
       body: JSON.stringify(query ? { query } : {}),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to start workflow run");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to start workflow run"));
     return res.json();
   },
   async listRuns(workflowId: string, page = 1, pageSize = 25): Promise<Paginated<WorkflowRun>> {
@@ -417,7 +443,7 @@ export const workflowApi = {
       method: "POST",
       body: JSON.stringify(reason ? { reason } : {}),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to approve workflow run");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to approve workflow run"));
     return res.json();
   },
   async rejectRun(workflowId: string, runId: string, reason?: string): Promise<WorkflowRun> {
@@ -425,7 +451,7 @@ export const workflowApi = {
       method: "POST",
       body: JSON.stringify(reason ? { reason } : {}),
     });
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to reject workflow run");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to reject workflow run"));
     return res.json();
   },
 };
@@ -464,17 +490,17 @@ export const connectorApi = {
     config: { owner: string; repo: string };
   }): Promise<Connector> {
     const res = await apiFetch("/connectors/", { method: "POST", body: JSON.stringify(data) });
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to connect integration");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to connect integration"));
     return res.json();
   },
   async disconnect(id: string): Promise<Connector> {
     const res = await apiFetch(`/connectors/${id}/disconnect`, { method: "POST" });
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to disconnect integration");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to disconnect integration"));
     return res.json();
   },
   async sync(id: string): Promise<{ id: string; status: string; detail: string }> {
     const res = await apiFetch(`/connectors/${id}/sync`, { method: "POST" });
-    if (!res.ok) throw new Error((await res.json()).detail || "Failed to trigger sync");
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to trigger sync"));
     return res.json();
   },
   async health(id: string): Promise<ConnectorHealth> {

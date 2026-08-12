@@ -1,0 +1,5 @@
+EKOA E2E test fixture document.
+
+This is a small synthetic text file uploaded by the Playwright E2E suite
+(apps/web/e2e/03-documents.spec.ts) to exercise the document ingestion
+pipeline: upload -> PENDING -> PROCESSING -> INDEXED via Celery/Qdrant.

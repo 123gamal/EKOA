@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -55,11 +55,25 @@ export function GitHubConnectorPanel({ workspaces }: { workspaces: { id: string;
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors },
   } = useForm<ConnectConnectorValues>({
     resolver: zodResolver(connectConnectorSchema),
     defaultValues: { workspaceId: selectedWs, name: "", owner: "", repo: "", accessToken: "" },
   });
+
+  // `workspaces` arrives asynchronously (useAllWorkspaces is a react-query
+  // hook), so it's always [] on first render — the useState initializer
+  // above only runs once and never re-evaluates once workspaces populates.
+  // Without this, selectedWs (and the form's workspaceId) stay "" forever,
+  // permanently disabling "Connect Repository" until the user manually
+  // touches the dropdown.
+  useEffect(() => {
+    if (!selectedWs && workspaces.length > 0) {
+      setSelectedWs(workspaces[0].id);
+      setValue("workspaceId", workspaces[0].id);
+    }
+  }, [workspaces, selectedWs, setValue]);
 
   const connectMutation = useMutation({
     mutationFn: (values: ConnectConnectorValues) =>
