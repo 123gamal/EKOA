@@ -81,6 +81,13 @@ class ConnectorCredential(Base, TimestampMixin):
     )
     token_type: Mapped[str] = mapped_column(String(50), default="pat", nullable=False)
     access_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    # OAuth2 only (Phase 14): refresh token + access-token expiry, so an
+    # adapter like Google Drive's can silently refresh before each use rather
+    # than failing once the short-lived access token expires.
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
     connector: Mapped[Connector] = relationship(back_populates="credential")

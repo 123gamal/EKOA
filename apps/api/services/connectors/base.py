@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Literal
 
 
 class ConnectorError(Exception):
@@ -57,10 +58,30 @@ class ConnectorSyncResult:
     details: list[str] = field(default_factory=list)
 
 
+@dataclass
+class OAuthTokenResult:
+    """Result of exchanging an OAuth2 authorization code for tokens.
+
+    ``refresh_token``/``expires_in`` are ``None`` for providers whose access
+    token doesn't expire (e.g. Slack bot tokens) — only providers that set
+    ``expires_in`` need :meth:`ConnectorAdapter.refresh_access_token` called
+    before use.
+    """
+
+    access_token: str
+    refresh_token: str | None = None
+    expires_in: int | None = None  # seconds
+    # Provider-specific identity to store in Connector.config_json (e.g.
+    # Slack's team id/name) — merged into whatever test_connection would
+    # have returned for a PAT-based provider.
+    config: dict = field(default_factory=dict)
+
+
 class ConnectorAdapter(ABC):
     """Interface every integration provider must implement."""
 
     provider: str = ""
+    auth_type: Literal["pat", "oauth2"] = "pat"
 
     @abstractmethod
     def test_connection(self, config: dict, access_token: str) -> dict:
@@ -79,10 +100,41 @@ class ConnectorAdapter(ABC):
     def health_check(self, config: dict, access_token: str, connector_status: dict) -> ConnectorHealth:
         """Report real integration health: token validity + last sync state."""
 
+    def identity_key(self, validated_config: dict) -> str | None:
+        """Optional stable identity used to dedupe re-connects to the same
+        remote resource (e.g. GitHub's "owner/repo"). ``None`` (the default)
+        means re-connects are only matched by connector name."""
+        return None
+
+    def oauth_authorize_url(self, state: str, *, workspace_id: str) -> str:
+        """Build the provider's consent-screen URL. OAuth2 adapters only."""
+        raise NotImplementedError(f"{self.provider} does not support OAuth2")
+
+    def oauth_exchange_code(self, code: str) -> OAuthTokenResult:
+        """Exchange an authorization code for tokens. OAuth2 adapters only."""
+        raise NotImplementedError(f"{self.provider} does not support OAuth2")
+
+    def refresh_access_token(self, refresh_token: str) -> OAuthTokenResult:
+        """Exchange a refresh token for a new access token. Only providers
+        whose access tokens expire (e.g. Google) need to override this."""
+        raise NotImplementedError(f"{self.provider} does not support token refresh")
+
 
 def get_connector_adapter(provider: str) -> ConnectorAdapter:
     """Resolve a connector adapter by provider name (registry)."""
     if provider == "github":
         from apps.api.services.connectors.github import GitHubConnector
         return GitHubConnector()
+    if provider == "jira":
+        from apps.api.services.connectors.jira import JiraConnector
+        return JiraConnector()
+    if provider == "notion":
+        from apps.api.services.connectors.notion import NotionConnector
+        return NotionConnector()
+    if provider == "slack":
+        from apps.api.services.connectors.slack import SlackConnector
+        return SlackConnector()
+    if provider == "google_drive":
+        from apps.api.services.connectors.google_drive import GoogleDriveConnector
+        return GoogleDriveConnector()
     raise ConnectorValidationError(f"Unsupported connector provider: {provider!r}")

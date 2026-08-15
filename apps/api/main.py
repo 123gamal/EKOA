@@ -16,6 +16,7 @@ from apps.api.routes import (
     mcp_keys,
     invites,
     activity,
+    oauth,
 )
 from apps.api.db.engine import get_engine
 from ekoa_config.settings import get_settings, resolve_cors_origins
@@ -94,6 +95,7 @@ app.include_router(connectors.router)
 app.include_router(mcp_keys.router)
 app.include_router(invites.router)
 app.include_router(activity.router)
+app.include_router(oauth.router)
 
 
 @app.get("/")

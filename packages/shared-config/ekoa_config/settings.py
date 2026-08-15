@@ -107,6 +107,20 @@ class Settings(BaseSettings):
     # the org invite accept link).
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # ── Connectors: OAuth2 apps (Phase 14) ────────────────────────────────
+    # Slack's redirect URI has no localhost exception (unlike Google), so
+    # dev/test uses an ngrok HTTPS tunnel — set SLACK_OAUTH_REDIRECT_URI to
+    # whatever that tunnel's current URL is.
+    SLACK_CLIENT_ID: str = ""
+    SLACK_CLIENT_SECRET: str = ""
+    SLACK_OAUTH_REDIRECT_URI: str = "http://localhost/api/v1/connectors/oauth/slack/callback"
+
+    GOOGLE_DRIVE_CLIENT_ID: str = ""
+    GOOGLE_DRIVE_CLIENT_SECRET: str = ""
+    GOOGLE_DRIVE_OAUTH_REDIRECT_URI: str = (
+        "http://localhost/api/v1/connectors/oauth/google_drive/callback"
+    )
+
     # ── MCP server (Phase 8) ─────────────────────────────────────────────
     # The MCP server exposes two tenant-scoped tools (search_knowledge_base,
     # list_documents) over the Streamable HTTP transport. Clients authenticate

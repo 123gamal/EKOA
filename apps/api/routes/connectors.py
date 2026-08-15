@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
@@ -116,10 +116,12 @@ async def connect_connector(
 
     encrypted_token = encrypt_secret(data.access_token)
 
-    # Re-connect is idempotent per (workspace, provider, repo): if a connector
-    # already exists for the same repo, refresh its credential instead of
-    # creating a duplicate integration row.
-    repo_key = f"{validated_config.get('owner', '')}/{validated_config.get('repo', '')}".strip("/")
+    # Re-connect is idempotent per (workspace, provider, remote resource): if
+    # a connector already exists for the same resource (per the adapter's
+    # identity_key — e.g. GitHub's "owner/repo", Jira's project key) or the
+    # same display name, refresh its credential instead of creating a
+    # duplicate integration row.
+    identity = adapter.identity_key(validated_config)
     stmt = (
         select(Connector)
         .options(selectinload(Connector.credential))
@@ -134,12 +136,8 @@ async def connect_connector(
         (
             c
             for c in existing
-            if c.name.lower() == data.name.lower() or (
-                (c.config_json or {}).get("owner")
-                and (c.config_json or {}).get("repo")
-                and f"{c.config_json['owner']}/{c.config_json['repo']}".lower()
-                == repo_key
-            )
+            if c.name.lower() == data.name.lower()
+            or (identity is not None and adapter.identity_key(c.config_json or {}) == identity)
         ),
         None,
     )
@@ -297,9 +295,9 @@ async def sync_connector(
     # Enqueue the worker task. A failed enqueue is visible (running → error),
     # never silently swallowed.
     try:
-        from apps.worker.tasks import sync_github_connector
+        from apps.worker.tasks import sync_connector_task
 
-        sync_github_connector.delay(
+        sync_connector_task.delay(
             str(connector.id), correlation_id=get_correlation_id()
         )
     except Exception as exc:  # noqa: BLE001
@@ -383,9 +381,24 @@ async def connector_health(
     detail = "No credential stored — connector is disconnected"
     if connector.credential is not None:
         try:
-            from ekoa_config.connector_crypto import decrypt_secret
+            from ekoa_config.connector_crypto import decrypt_secret, encrypt_secret
+            from apps.api.services.connectors.google_drive import token_expired
 
-            token = decrypt_secret(connector.credential.access_token_encrypted)
+            credential = connector.credential
+            token = decrypt_secret(credential.access_token_encrypted)
+            # OAuth2 providers whose access token can expire (Google Drive):
+            # refresh before checking rather than reporting a false "invalid".
+            if credential.refresh_token_encrypted and token_expired(credential.token_expires_at):
+                refresh_token = decrypt_secret(credential.refresh_token_encrypted)
+                refreshed = adapter.refresh_access_token(refresh_token)
+                token = refreshed.access_token
+                credential.access_token_encrypted = encrypt_secret(refreshed.access_token)
+                if refreshed.expires_in:
+                    credential.token_expires_at = datetime.now(timezone.utc) + timedelta(
+                        seconds=refreshed.expires_in
+                    )
+                await db.commit()
+
             health = adapter.health_check(
                 connector.config_json or {}, token, connector_status
             )

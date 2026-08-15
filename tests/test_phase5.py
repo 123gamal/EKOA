@@ -418,6 +418,11 @@ async def test_graph_falls_back_to_retrieved_when_no_claims(monkeypatch):
             {"provider": "deepseek", "model": "deepseek-chat"},
         ),
     )
+    # Force the "qa" path deterministically (Phase 15's planner would
+    # otherwise classify a bare "hi" as chitchat and skip retrieval
+    # entirely, which is correct new behavior but not what this test is
+    # about — it's testing citation fallback, which needs retrieval to run).
+    monkeypatch.setattr(graph_mod, "_classify_intent", lambda user_msg: "qa")
     monkeypatch.setattr(
         graph_mod, "retrieve_chunks",
         lambda query, collection_name, organization_id=None, workspace_id=None:

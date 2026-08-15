@@ -572,11 +572,21 @@ export const connectorApi = {
     workspace_id: string;
     name: string;
     access_token: string;
-    config: { owner: string; repo: string };
+    config: Record<string, string>;
   }): Promise<Connector> {
     const res = await apiFetch("/connectors/", { method: "POST", body: JSON.stringify(data) });
     if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to connect integration"));
     return res.json();
+  },
+  /** Start an OAuth2 connector install (Slack, Google Drive): fetch the
+   * provider's consent-screen URL (authenticated) and navigate there. */
+  async connectOAuth(provider: string, workspaceId: string): Promise<void> {
+    const res = await apiFetch(
+      `/connectors/oauth/${provider}/authorize?workspace_id=${workspaceId}`
+    );
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to start OAuth connection"));
+    const { authorize_url } = await res.json();
+    window.location.href = authorize_url;
   },
   async disconnect(id: string): Promise<Connector> {
     const res = await apiFetch(`/connectors/${id}/disconnect`, { method: "POST" });

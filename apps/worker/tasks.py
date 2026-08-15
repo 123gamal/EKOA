@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from ekoa_config.settings import get_settings
@@ -14,6 +14,7 @@ from apps.api.db.base import Base
 from apps.api.services.connectors.base import (
     ConnectorSyncError,
     ConnectorValidationError,
+    get_connector_adapter,
 )
 
 from apps.worker.chunking import chunk_text
@@ -146,24 +147,48 @@ def run_workflow(self, run_id: str, correlation_id: str | None = None):
         raise self.retry(exc=exc)
 
 
+def _ensure_fresh_credential(db: Session, connector, credential) -> str:
+    """Return a usable plaintext access token, refreshing it first if the
+    stored one is OAuth2 and expired (Google Drive today; a no-op for every
+    other provider since they never populate ``refresh_token_encrypted``)."""
+    from ekoa_config.connector_crypto import decrypt_secret, encrypt_secret
+    from apps.api.services.connectors.google_drive import token_expired
+
+    token = decrypt_secret(credential.access_token_encrypted)
+    if not credential.refresh_token_encrypted:
+        return token
+    if not token_expired(credential.token_expires_at):
+        return token
+
+    adapter = get_connector_adapter(connector.provider)
+    refresh_token = decrypt_secret(credential.refresh_token_encrypted)
+    refreshed = adapter.refresh_access_token(refresh_token)
+    credential.access_token_encrypted = encrypt_secret(refreshed.access_token)
+    if refreshed.expires_in:
+        credential.token_expires_at = datetime.now(timezone.utc) + timedelta(
+            seconds=refreshed.expires_in
+        )
+    db.commit()
+    return refreshed.access_token
+
+
 @app.task(bind=True, max_retries=3, default_retry_delay=60)
-def sync_github_connector(self, connector_id: str, correlation_id: str | None = None):
-    """Pull a connected GitHub repo's README + docs/**/*.md into Qdrant.
+def sync_connector_task(self, connector_id: str, correlation_id: str | None = None):
+    """Sync any connected integration into Qdrant, dispatched by provider.
 
     The worker holds the decryption key, so the token is only in plaintext
     within this process for the duration of the run. On a permanent failure
-    (bad/revoked token, unreachable repo) the connector is marked ``error``
-    with a reason and the task does NOT retry. Transient infrastructure
-    failures (DB/Qdrant) retry via :class:`RetryableProcessingError`.
+    (bad/revoked token, unreachable resource) the connector is marked
+    ``error`` with a reason and the task does NOT retry. Transient
+    infrastructure failures (DB/Qdrant) retry via
+    :class:`RetryableProcessingError`.
     """
     _apply_correlation(correlation_id)
-    task_logger = get_logger("worker.tasks.sync_github_connector")
+    task_logger = get_logger("worker.tasks.sync_connector_task")
     task_logger.info(
-        "task_started", extra={"task": "sync_github_connector", "connector_id": connector_id}
+        "task_started", extra={"task": "sync_connector_task", "connector_id": connector_id}
     )
     from apps.api.models.connector import Connector, ConnectorCredential
-    from apps.api.services.connectors.github import GitHubConnector
-    from ekoa_config.connector_crypto import decrypt_secret
 
     connector_uuid = uuid.UUID(connector_id)
     engine = get_sync_engine()
@@ -194,8 +219,8 @@ def sync_github_connector(self, connector_id: str, correlation_id: str | None = 
                 )
                 return
 
-            token = decrypt_secret(credential.access_token_encrypted)
-            result = GitHubConnector().sync(
+            token = _ensure_fresh_credential(db, connector, credential)
+            result = get_connector_adapter(connector.provider).sync(
                 connector.config_json or {},
                 token,
                 workspace_id=connector.workspace_id,
@@ -214,13 +239,14 @@ def sync_github_connector(self, connector_id: str, correlation_id: str | None = 
             task_logger.info(
                 "task_succeeded",
                 extra={
-                    "task": "sync_github_connector",
+                    "task": "sync_connector_task",
                     "connector_id": connector_id,
+                    "provider": connector.provider,
                     "summary": result.details,
                 },
             )
     except (ConnectorValidationError, ConnectorSyncError) as exc:
-        # Permanent failure: token invalid/revoked, repo gone. Mark the
+        # Permanent failure: token invalid/revoked, resource gone. Mark the
         # connector error so the UI/health surface the broken state; no retry.
         with Session(engine) as db:
             connector = db.query(Connector).filter(Connector.id == connector_uuid).first()

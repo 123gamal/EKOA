@@ -370,7 +370,7 @@ def _install_fake_github(monkeypatch, files: dict[str, bytes]):
 def test_sync_ingests_docs_and_dedups_on_resync(sync_db, monkeypatch):
     """First sync indexes README + docs/**.md; a re-sync with unchanged files
     creates NO new Documents and NO new DocumentVersions (checksum dedup)."""
-    from apps.worker.tasks import sync_github_connector
+    from apps.worker.tasks import sync_connector_task
 
     connector_id = _seed_connector_sync(sync_db)
     _install_fake_embeddings(monkeypatch)
@@ -387,7 +387,7 @@ def test_sync_ingests_docs_and_dedups_on_resync(sync_db, monkeypatch):
     monkeypatch.setattr(tasks_mod, "get_sync_engine", lambda: sync_db)
 
     # Celery task body runs synchronously via .run()
-    sync_github_connector.run(connector_id=str(connector_id))
+    sync_connector_task.run(connector_id=str(connector_id))
 
     with Session(sync_db) as db:
         docs = db.query(Document).filter(Document.deleted_at.is_(None)).all()
@@ -405,7 +405,7 @@ def test_sync_ingests_docs_and_dedups_on_resync(sync_db, monkeypatch):
         assert conn.last_sync_document_count == 3
 
     # Re-sync: nothing changed â†’ everything skipped, zero new rows.
-    sync_github_connector.run(connector_id=str(connector_id))
+    sync_connector_task.run(connector_id=str(connector_id))
 
     with Session(sync_db) as db:
         docs = db.query(Document).filter(Document.deleted_at.is_(None)).all()
@@ -420,7 +420,7 @@ def test_sync_ingests_docs_and_dedups_on_resync(sync_db, monkeypatch):
 def test_sync_reprocesses_changed_file_only(sync_db, monkeypatch):
     """Only the changed file is re-indexed (new DocumentVersion v2); the others
     are skipped and keep version 1."""
-    from apps.worker.tasks import sync_github_connector
+    from apps.worker.tasks import sync_connector_task
 
     connector_id = _seed_connector_sync(sync_db)
     _install_fake_embeddings(monkeypatch)
@@ -433,10 +433,10 @@ def test_sync_reprocesses_changed_file_only(sync_db, monkeypatch):
     import apps.worker.tasks as tasks_mod
     monkeypatch.setattr(tasks_mod, "get_sync_engine", lambda: sync_db)
 
-    sync_github_connector.run(connector_id=str(connector_id))
+    sync_connector_task.run(connector_id=str(connector_id))
     # Change README content only.
     files["README.md"] = b"# Backend\n\nThis README was updated with new content."
-    sync_github_connector.run(connector_id=str(connector_id))
+    sync_connector_task.run(connector_id=str(connector_id))
 
     with Session(sync_db) as db:
         versions = db.query(DocumentVersion).order_by(DocumentVersion.document_id, DocumentVersion.version).all()
@@ -451,7 +451,7 @@ def test_sync_reprocesses_changed_file_only(sync_db, monkeypatch):
 def test_sync_revoked_token_marks_connector_error(sync_db, monkeypatch):
     """A revoked/invalid token fails gracefully: connector flips to error with
     a reason; the task does not crash and does not create documents."""
-    from apps.worker.tasks import sync_github_connector
+    from apps.worker.tasks import sync_connector_task
 
     connector_id = _seed_connector_sync(sync_db)
     _install_fake_embeddings(monkeypatch)
@@ -472,7 +472,7 @@ def test_sync_revoked_token_marks_connector_error(sync_db, monkeypatch):
     monkeypatch.setattr(tasks_mod, "get_sync_engine", lambda: sync_db)
 
     # Should NOT raise â€” permanent failure is recorded, not retried.
-    sync_github_connector.run(connector_id=str(connector_id))
+    sync_connector_task.run(connector_id=str(connector_id))
 
     with Session(sync_db) as db:
         conn = db.query(Connector).filter(Connector.id == connector_id).first()
@@ -600,7 +600,7 @@ async def test_sync_trigger_enqueues_and_audits(client, db_session, monkeypatch)
 
     # Stub the Celery task so no broker/worker is needed in tests.
     fake_tasks = types.ModuleType("apps.worker.tasks")
-    fake_tasks.sync_github_connector = types.SimpleNamespace(delay=lambda *a, **k: None)
+    fake_tasks.sync_connector_task = types.SimpleNamespace(delay=lambda *a, **k: None)
     monkeypatch.setitem(sys.modules, "apps.worker.tasks", fake_tasks)
 
     s = await client.post(f"/api/v1/connectors/{connector_id}/sync", headers=seed["headers"])

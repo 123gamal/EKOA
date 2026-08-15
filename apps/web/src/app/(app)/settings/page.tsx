@@ -6,7 +6,7 @@ import { Settings, User, Plug, Users, ChevronRight } from "lucide-react";
 import { authApi, type UserProfile } from "@/lib/api";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { GitHubConnectorPanel } from "@/components/integrations/GitHubConnectorPanel";
+import { IntegrationsPanel } from "@/components/integrations/IntegrationsPanel";
 import { useAllWorkspaces } from "@/lib/queries";
 
 export default function SettingsPage() {
@@ -98,7 +98,7 @@ export default function SettingsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <GitHubConnectorPanel workspaces={workspaces} />
+          <IntegrationsPanel workspaces={workspaces} />
         </CardContent>
       </Card>
 

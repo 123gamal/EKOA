@@ -204,6 +204,8 @@ def _build_initial_state(
         "citations_unverified": False,
         "llm_telemetry": {},
         "retrieval_latency_ms": None,
+        "intent": None,
+        "conversation_summary": None,
     }
 
 
