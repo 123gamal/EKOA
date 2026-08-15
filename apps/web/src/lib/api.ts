@@ -243,6 +243,24 @@ export interface Notification {
   created_at: string;
 }
 
+export interface AdminWorkspaceSummary {
+  id: string;
+  name: string;
+  description?: string | null;
+  document_count: number;
+  connector_count: number;
+  workflow_count: number;
+  creator_name?: string | null;
+  created_at: string;
+}
+
+export interface AdminOrgOverview {
+  organization_id: string;
+  organization_name: string;
+  member_count: number;
+  workspaces: AdminWorkspaceSummary[];
+}
+
 export interface ConnectorHealth {
   id: string;
   provider: string;
@@ -398,6 +416,11 @@ export const orgApi = {
   async getBySlug(slug: string): Promise<Organization> {
     const res = await apiFetch(`/organizations/${slug}`);
     if (!res.ok) throw new Error("Organization not found");
+    return res.json();
+  },
+  async adminWorkspaces(orgId: string): Promise<AdminOrgOverview> {
+    const res = await apiFetch(`/organizations/${orgId}/admin/workspaces`);
+    if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to load admin overview"));
     return res.json();
   },
 };

@@ -11,6 +11,7 @@ const protectedPrefixes = [
   "/workflows",
   "/analytics",
   "/settings",
+  "/admin",
 ];
 
 function redirectToLogin(request: NextRequest) {
@@ -62,5 +63,6 @@ export const config = {
     "/workflows/:path*",
     "/analytics/:path*",
     "/settings/:path*",
+    "/admin/:path*",
   ],
 };

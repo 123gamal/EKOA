@@ -20,6 +20,14 @@ ARG API_URL=http://localhost:8000
 ARG AI_URL=http://localhost:8001
 ENV API_URL=$API_URL
 ENV AI_URL=$AI_URL
+# NEXT_PUBLIC_* vars are inlined into the client bundle at build time — a
+# runtime `environment:` entry in docker-compose has no effect on them, so
+# they must be passed as build args here (unlike API_URL/AI_URL above, which
+# are only read server-side by next.config.ts's proxy rewrites).
+ARG NEXT_PUBLIC_API_URL=http://localhost/api/v1
+ARG NEXT_PUBLIC_WS_URL=ws://localhost/ws
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY apps/web/ .
 RUN npm run build

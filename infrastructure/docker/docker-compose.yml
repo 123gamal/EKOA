@@ -320,13 +320,24 @@ services:
       args:
         API_URL: "http://api:8000"
         AI_URL: "http://ai:8001"
+        # NEXT_PUBLIC_* vars are inlined into the client bundle at build
+        # time (see web.Dockerfile's comment) — setting them under
+        # `environment:` below has NO effect on what the browser actually
+        # requests, so they must be passed here instead.
+        NEXT_PUBLIC_API_URL: "http://localhost/api/v1"
+        NEXT_PUBLIC_WS_URL: "ws://localhost/ws"
     container_name: ekoa-web
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-3000}:3000"
+    # middleware.ts verifies the access-token JWT signature server-side
+    # (Edge runtime) before treating a request as authenticated, so it needs
+    # the same JWT_SECRET_KEY as api/ai/worker — without this every request
+    # to a protected route silently redirects back to /login regardless of
+    # whether the token is actually valid.
+    env_file:
+      - ../../.env
     environment:
-      NEXT_PUBLIC_API_URL: "http://localhost/api/v1"
-      NEXT_PUBLIC_WS_URL: "ws://localhost/ws"
       API_URL: "http://api:8000"
       AI_URL: "http://ai:8001"
     healthcheck:

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Settings, User, Plug, Users, ChevronRight } from "lucide-react";
+import { Settings, User, Plug, Users, ChevronRight, ShieldCheck } from "lucide-react";
 import { authApi, type UserProfile } from "@/lib/api";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -82,6 +82,23 @@ export default function SettingsPage() {
                 <h2 className="font-semibold">Team</h2>
                 <p className="text-xs text-[var(--muted-foreground)]">
                   Invite teammates and manage roles
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="h-4 w-4 text-[var(--muted-foreground)]" />
+          </CardContent>
+        </Card>
+      </Link>
+
+      <Link href="/admin">
+        <Card className="transition-colors hover:border-[var(--primary)]/40">
+          <CardContent className="flex items-center justify-between py-4">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5" />
+              <div>
+                <h2 className="font-semibold">Admin Console</h2>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  Org-wide workspace overview (admin/owner only)
                 </p>
               </div>
             </div>

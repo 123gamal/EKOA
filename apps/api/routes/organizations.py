@@ -12,7 +12,12 @@ from apps.api.dependencies import authz
 from apps.api.models.user import User
 from apps.api.models.organization import Organization
 from apps.api.models.org_member import OrgMember
+from apps.api.models.workspace import Workspace
+from apps.api.models.document import Document
+from apps.api.models.connector import Connector
+from apps.api.models.workflow import Workflow
 from apps.api.services import org_service, audit_service, invite_service
+from ekoa_types.admin import AdminOrgOverview, AdminWorkspaceSummary
 from ekoa_types.member import MemberRoleUpdateRequest, OrgMemberResponse
 from ekoa_types.organization import OrganizationCreate, OrganizationResponse
 from ekoa_types.pagination import (
@@ -270,3 +275,93 @@ async def remove_member(
         organization_id=org.id,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Org-level admin console (Phase 16 Part D) ────────────────────────────────
+
+
+@router.get("/{org_id}/admin/workspaces", response_model=AdminOrgOverview)
+async def admin_workspaces(
+    org_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every workspace in an org with member/document/connector/workflow
+    counts, for an org admin's cross-workspace overview.
+
+    Org-level only (per explicit scope decision): this reads the caller's own
+    org-admin role, NOT a platform-wide superadmin — ``users.is_superuser``
+    stays unwired. Admin+ required (member role cannot see this).
+    """
+    await authz.assert_min_role(db, current_user.id, org_id, "admin")
+
+    org = (
+        await db.execute(select(Organization).where(Organization.id == org_id))
+    ).scalar_one_or_none()
+    if org is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+
+    member_count = (
+        await db.execute(
+            select(func.count()).select_from(
+                select(OrgMember).where(OrgMember.organization_id == org_id).subquery()
+            )
+        )
+    ).scalar_one()
+
+    ws_stmt = (
+        select(Workspace, User.full_name)
+        .join(User, User.id == Workspace.created_by)
+        .where(Workspace.organization_id == org_id, Workspace.deleted_at.is_(None))
+        .order_by(Workspace.created_at.desc())
+    )
+    rows = (await db.execute(ws_stmt)).all()
+
+    workspaces: list[AdminWorkspaceSummary] = []
+    for ws, creator_name in rows:
+        doc_count = (
+            await db.execute(
+                select(func.count()).select_from(
+                    select(Document)
+                    .where(Document.workspace_id == ws.id, Document.deleted_at.is_(None))
+                    .subquery()
+                )
+            )
+        ).scalar_one()
+        connector_count = (
+            await db.execute(
+                select(func.count()).select_from(
+                    select(Connector)
+                    .where(Connector.workspace_id == ws.id, Connector.deleted_at.is_(None))
+                    .subquery()
+                )
+            )
+        ).scalar_one()
+        workflow_count = (
+            await db.execute(
+                select(func.count()).select_from(
+                    select(Workflow)
+                    .where(Workflow.workspace_id == ws.id, Workflow.deleted_at.is_(None))
+                    .subquery()
+                )
+            )
+        ).scalar_one()
+        workspaces.append(
+            AdminWorkspaceSummary(
+                id=ws.id,
+                name=ws.name,
+                description=ws.description,
+                document_count=doc_count,
+                connector_count=connector_count,
+                workflow_count=workflow_count,
+                creator_name=creator_name,
+                created_at=ws.created_at,
+            )
+        )
+
+    return AdminOrgOverview(
+        organization_id=org.id,
+        organization_name=org.name,
+        member_count=member_count,
+        workspaces=workspaces,
+    )
