@@ -238,6 +238,8 @@ services:
           cpus: "1.0"
     volumes:
       - uploads_data:/app/uploads
+    ports:
+      - "${WORKER_METRICS_PORT:-9100}:9100"
     networks:
       - ekoa-network
 
@@ -354,6 +356,85 @@ services:
     networks:
       - ekoa-network
 
+  # ---------------------------------------------------------------------------
+  # Observability: Prometheus (metrics) + Grafana (dashboards) + Loki/Promtail
+  # (logs) + Tempo (traces) — Phase 16 Part F. Purely additive: none of the
+  # app services depend on these, so their absence never breaks the app.
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: ekoa-prometheus
+    restart: unless-stopped
+    volumes:
+      - ../observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - ekoa-network
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: ekoa-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    networks:
+      - ekoa-network
+
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: ekoa-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ../observability/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    networks:
+      - ekoa-network
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: ekoa-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ../observability/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    networks:
+      - ekoa-network
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    container_name: ekoa-tempo
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/tempo-config.yml
+    volumes:
+      - ../observability/tempo-config.yml:/etc/tempo/tempo-config.yml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "${TEMPO_OTLP_GRPC_PORT:-4317}:4317"
+      - "${TEMPO_OTLP_HTTP_PORT:-4318}:4318"
+      - "${TEMPO_QUERY_PORT:-3200}:3200"
+    networks:
+      - ekoa-network
+
 # =============================================================================
 # Named Volumes
 # =============================================================================
@@ -365,6 +446,14 @@ volumes:
   redis_data:
     driver: local
   uploads_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  loki_data:
+    driver: local
+  tempo_data:
     driver: local
 
 # =============================================================================

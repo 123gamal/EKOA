@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from starlette.responses import Response
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select, text
@@ -25,8 +26,10 @@ from apps.api.db.engine import get_db, get_engine
 from apps.api.services import audit_service
 from ekoa_config.settings import get_settings, resolve_cors_origins
 from ekoa_config.logging import setup_logging, CorrelationIdMiddleware
+from ekoa_config.metrics import AI_CHAT_LATENCY, PrometheusMiddleware, metrics_response
 from ekoa_config.rate_limit import RateLimitMiddleware
 from ekoa_config.redis_client import get_async_redis
+from ekoa_config.tracing import setup_tracing
 from ekoa_types.conversation import ConversationResponse, MessageResponse
 from ekoa_types.pagination import (
     DEFAULT_PAGE,
@@ -42,6 +45,8 @@ setup_logging("ai")
 settings = get_settings()
 
 app = FastAPI(title="EKOA AI Service", version="0.1.0")
+
+setup_tracing("ai", app)
 router = APIRouter(prefix="/api/v1/ai")
 
 cors_origins = resolve_cors_origins(settings)
@@ -55,6 +60,7 @@ app.add_middleware(
 )
 
 app.add_middleware(CorrelationIdMiddleware)
+app.add_middleware(PrometheusMiddleware, service="ai")
 
 # General default per-IP rate limit for every request (except /health).
 app.add_middleware(RateLimitMiddleware)
@@ -320,6 +326,12 @@ async def _write_ai_call_log(
 # ── REST Endpoints ───────────────────────────────────────────────────────────
 
 
+@app.get("/metrics")
+async def metrics():
+    body, content_type = metrics_response()
+    return Response(content=body, media_type=content_type)
+
+
 @app.get("/health")
 async def health_check():
     """Liveness probe that verifies real dependencies, not just the process.
@@ -397,6 +409,9 @@ async def chat_sync(
         db, current_user, conversation, req.workspace_id, organization_id, result
     )
     total_latency = round((time.perf_counter() - start) * 1000, 2)
+    AI_CHAT_LATENCY.labels(degraded=str(bool(result.get("degraded"))).lower()).observe(
+        total_latency / 1000
+    )
     await _write_ai_call_log(
         db,
         user_id=current_user.id,
@@ -519,6 +534,9 @@ async def chat_stream(
                     final_output or {},
                 )
                 total_latency = round((time.perf_counter() - start) * 1000, 2)
+                AI_CHAT_LATENCY.labels(
+                    degraded=str(bool((final_output or {}).get("degraded"))).lower()
+                ).observe(total_latency / 1000)
                 await _write_ai_call_log(
                     db,
                     user_id=current_user.id,

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from ekoa_config.settings import get_settings
 from ekoa_config.logging import get_logger
+from ekoa_config.metrics import WORKFLOW_RUN_COUNT
 from ekoa_utils.naming import workspace_collection_name
 
 from apps.api.models.document import Document
@@ -401,6 +402,7 @@ def _run_workflow_core(db: Session, run_id: str) -> None:
         run.completed_at = datetime.now(timezone.utc)
         wf.status = "COMPLETED"
     db.commit()
+    WORKFLOW_RUN_COUNT.labels(template_id=wf.template_id, status=run.status.lower()).inc()
 
 
 def run_workflow_sync(run_id: str) -> None:

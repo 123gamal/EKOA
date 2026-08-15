@@ -22,6 +22,7 @@ from apps.worker.main import app
 from apps.worker.parsers import parse_file
 from apps.worker.workflow_executor import get_sync_engine
 from ekoa_config.logging import get_logger, correlation_id_var
+from ekoa_config.metrics import CONNECTOR_SYNC_COUNT
 from ekoa_utils.naming import workspace_collection_name
 
 logger = logging.getLogger(__name__)
@@ -260,6 +261,7 @@ def sync_connector_task(self, connector_id: str, correlation_id: str | None = No
             connector.last_sync_error = None
             connector.last_sync_document_count = result.files_processed
             db.commit()
+            CONNECTOR_SYNC_COUNT.labels(provider=connector.provider, status="success").inc()
 
             task_logger.info(
                 "task_succeeded",
@@ -283,6 +285,7 @@ def sync_connector_task(self, connector_id: str, correlation_id: str | None = No
                 connector.last_sync_at = datetime.now(timezone.utc)
                 db.commit()
                 _notify_connector_sync_failed(db, connector, str(exc))
+                CONNECTOR_SYNC_COUNT.labels(provider=connector.provider, status="failed").inc()
         task_logger.error(
             "connector_sync_permanent_failure",
             extra={"connector_id": connector_id, "error": str(exc)},

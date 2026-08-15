@@ -22,8 +22,11 @@ from apps.api.routes import (
 from apps.api.db.engine import get_engine
 from ekoa_config.settings import get_settings, resolve_cors_origins
 from ekoa_config.logging import setup_logging, CorrelationIdMiddleware
+from ekoa_config.metrics import PrometheusMiddleware, metrics_response
 from ekoa_config.rate_limit import RateLimitMiddleware
 from ekoa_config.redis_client import get_async_redis
+from ekoa_config.tracing import setup_tracing
+from starlette.responses import Response
 
 # Import models so they are registered on Base.metadata (required for Alembic
 # autogenerate; the schema itself is applied by migrations, not create_all).
@@ -64,6 +67,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+setup_tracing("api", app)
+
 # CORS middleware from settings. The origins list is validated at startup:
 # combining allow_credentials=True with "*" raises a RuntimeError instead of
 # silently misconfiguring cross-origin requests.
@@ -80,6 +85,7 @@ app.add_middleware(
 # Correlation middleware added after CORS so it runs closest to the handlers
 # and its request log line covers the handled request/response.
 app.add_middleware(CorrelationIdMiddleware)
+app.add_middleware(PrometheusMiddleware, service="api")
 
 # General default per-IP rate limit for every request (except /health). Tight
 # per-route limits for /auth/login, /auth/register, /auth/refresh are declared
@@ -99,6 +105,12 @@ app.include_router(invites.router)
 app.include_router(activity.router)
 app.include_router(oauth.router)
 app.include_router(notifications.router)
+
+
+@app.get("/metrics")
+async def metrics():
+    body, content_type = metrics_response()
+    return Response(content=body, media_type=content_type)
 
 
 @app.get("/")

@@ -153,6 +153,12 @@ class Settings(BaseSettings):
     MCP_ISSUER_URL: str = "http://localhost:8002/"
     MCP_RESOURCE_SERVER_URL: str = "http://localhost:8002/mcp"
 
+    # ── Observability (Phase 16 Part F) ───────────────────────────────────
+    # Celery workers have no shared ASGI app to hang a /metrics route off, so
+    # each worker process starts its own tiny prometheus_client HTTP server
+    # on this port instead (see apps/worker/main.py).
+    WORKER_METRICS_PORT: int = 9100
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

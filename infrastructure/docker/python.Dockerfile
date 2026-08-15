@@ -23,6 +23,10 @@ COPY packages/shared-utils/pyproject.toml packages/shared-utils/
 COPY packages/shared-config/ekoa_config/ packages/shared-config/ekoa_config/
 COPY packages/shared-types/ekoa_types/ packages/shared-types/ekoa_types/
 COPY packages/shared-utils/ekoa_utils/ packages/shared-utils/ekoa_utils/
+# Includes OpenTelemetry (see ekoa_config/tracing.py) via shared-config's own
+# pyproject.toml dependencies — shared by every service (api/ai/worker/mcp)
+# so traces from any of them export to the same Tempo backend and correlate
+# via the same correlation_id already threaded through ekoa_config.logging.
 RUN pip install --no-cache-dir packages/shared-config \
  && pip install --no-cache-dir packages/shared-types \
  && pip install --no-cache-dir packages/shared-utils
