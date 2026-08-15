@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import { renderWithIntl } from "@/test/render-with-intl";
 import userEvent from "@testing-library/user-event";
 import LoginPage from "./page";
 
@@ -37,7 +38,7 @@ describe("LoginForm", () => {
   });
 
   it("renders email and password fields", () => {
-    render(<LoginPage />);
+    renderWithIntl(<LoginPage />);
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign In" })).toBeInTheDocument();
@@ -45,7 +46,7 @@ describe("LoginForm", () => {
 
   it("shows validation errors for empty submit", async () => {
     const user = userEvent.setup();
-    render(<LoginPage />);
+    renderWithIntl(<LoginPage />);
     await user.click(screen.getByRole("button", { name: "Sign In" }));
 
     await waitFor(() => {
@@ -57,7 +58,7 @@ describe("LoginForm", () => {
 
   it("shows an email format error for an invalid email", async () => {
     const user = userEvent.setup();
-    render(<LoginPage />);
+    renderWithIntl(<LoginPage />);
     await user.type(screen.getByLabelText("Email"), "not-an-email");
     await user.type(screen.getByLabelText("Password"), "hunter2hunter");
     await user.click(screen.getByRole("button", { name: "Sign In" }));
@@ -71,7 +72,7 @@ describe("LoginForm", () => {
   it("calls authApi.login and stores the token on valid submit", async () => {
     loginMock.mockResolvedValue({ access_token: "jwt-token", refresh_token: "x", token_type: "bearer" });
     const user = userEvent.setup();
-    render(<LoginPage />);
+    renderWithIntl(<LoginPage />);
 
     await user.type(screen.getByLabelText("Email"), "admin@ekoa.dev");
     await user.type(screen.getByLabelText("Password"), "hunter2hunter");
@@ -87,7 +88,7 @@ describe("LoginForm", () => {
   it("surfaces an API error in a role=alert banner", async () => {
     loginMock.mockRejectedValue(new Error("Invalid credentials"));
     const user = userEvent.setup();
-    render(<LoginPage />);
+    renderWithIntl(<LoginPage />);
 
     await user.type(screen.getByLabelText("Email"), "admin@ekoa.dev");
     await user.type(screen.getByLabelText("Password"), "hunter2hunter");

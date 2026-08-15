@@ -15,6 +15,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { authApi } from "@/lib/api";
@@ -22,17 +23,19 @@ import { clearTokens, getAccessToken } from "@/lib/auth";
 import { Button } from "@/components/ui/Button";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { NotificationBell } from "@/components/layout/NotificationBell";
+import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/chat", label: "AI Chat", icon: MessageSquare },
-  { href: "/documents", label: "Knowledge", icon: FileText },
-  { href: "/workflows", label: "Workflows", icon: GitBranch },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
+  { href: "/dashboard", key: "dashboard", icon: LayoutDashboard },
+  { href: "/chat", key: "chat", icon: MessageSquare },
+  { href: "/documents", key: "documents", icon: FileText },
+  { href: "/workflows", key: "workflows", icon: GitBranch },
+  { href: "/analytics", key: "analytics", icon: BarChart3 },
+  { href: "/settings", key: "settings", icon: Settings },
+] as const;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const t = useTranslations("nav");
   const pathname = usePathname();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -111,7 +114,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 space-y-1 p-3">
-          {navItems.map(({ href, label, icon: Icon }) => {
+          {navItems.map(({ href, key, icon: Icon }) => {
             const active =
               pathname === href || pathname.startsWith(href + "/");
             return (
@@ -134,7 +137,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   />
                 )}
                 <Icon className="relative z-10 h-4 w-4 shrink-0" />
-                <span className="relative z-10">{label}</span>
+                <span className="relative z-10">{t(key)}</span>
                 {active && (
                   <span className="relative z-10 ml-auto h-1.5 w-1.5 rounded-full bg-[var(--primary)]" />
                 )}
@@ -157,7 +160,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             onClick={handleLogout}
           >
             <LogOut className="h-4 w-4" />
-            Sign Out
+            {t("signOut")}
           </Button>
         </div>
       </aside>
@@ -178,11 +181,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span>EKOA</span>
               <ChevronRight className="h-4 w-4" />
               <span className="text-[var(--foreground)] font-medium">
-                {currentNav.label}
+                {t(currentNav.key)}
               </span>
             </div>
           )}
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-2">
+            <LanguageSwitcher />
             <NotificationBell />
             <ThemeToggle />
           </div>

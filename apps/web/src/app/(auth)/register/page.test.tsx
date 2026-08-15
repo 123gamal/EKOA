@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import { renderWithIntl } from "@/test/render-with-intl";
 import userEvent from "@testing-library/user-event";
 import RegisterPage from "./page";
 
@@ -29,7 +30,7 @@ describe("RegisterForm", () => {
   });
 
   it("renders all registration fields", () => {
-    render(<RegisterPage />);
+    renderWithIntl(<RegisterPage />);
     expect(screen.getByLabelText("Full Name")).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
@@ -37,7 +38,7 @@ describe("RegisterForm", () => {
 
   it("rejects a password shorter than 8 characters", async () => {
     const user = userEvent.setup();
-    render(<RegisterPage />);
+    renderWithIntl(<RegisterPage />);
 
     await user.type(screen.getByLabelText("Full Name"), "Ada Lovelace");
     await user.type(screen.getByLabelText("Email"), "ada@ekoa.dev");
@@ -53,7 +54,7 @@ describe("RegisterForm", () => {
   it("calls authApi.register and navigates to login on valid submit", async () => {
     registerMock.mockResolvedValue({});
     const user = userEvent.setup();
-    render(<RegisterPage />);
+    renderWithIntl(<RegisterPage />);
 
     await user.type(screen.getByLabelText("Full Name"), "Ada Lovelace");
     await user.type(screen.getByLabelText("Email"), "ada@ekoa.dev");
@@ -73,7 +74,7 @@ describe("RegisterForm", () => {
   it("surfaces an API error in a role=alert banner", async () => {
     registerMock.mockRejectedValue(new Error("Email already registered"));
     const user = userEvent.setup();
-    render(<RegisterPage />);
+    renderWithIntl(<RegisterPage />);
 
     await user.type(screen.getByLabelText("Full Name"), "Ada Lovelace");
     await user.type(screen.getByLabelText("Email"), "ada@ekoa.dev");

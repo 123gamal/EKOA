@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { authApi } from "@/lib/api";
@@ -11,6 +12,7 @@ import { Input } from "@/components/ui/Input";
 import { Card, CardContent } from "@/components/ui/Card";
 
 export default function RegisterPage() {
+  const t = useTranslations("auth.register");
   const router = useRouter();
 
   const {
@@ -39,9 +41,9 @@ export default function RegisterPage() {
       <CardContent className="pt-6">
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           <div className="mb-6 text-center">
-            <h1 className="text-gradient-brand text-2xl font-bold">Create Account</h1>
+            <h1 className="text-gradient-brand text-2xl font-bold">{t("title")}</h1>
             <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-              Join your organization on EKOA
+              {t("subtitle")}
             </p>
           </div>
 
@@ -55,7 +57,7 @@ export default function RegisterPage() {
           )}
 
           <Input
-            label="Full Name"
+            label={t("fullName")}
             id="fullName"
             type="text"
             autoComplete="name"
@@ -64,7 +66,7 @@ export default function RegisterPage() {
           />
 
           <Input
-            label="Email"
+            label={t("email")}
             id="email"
             type="email"
             autoComplete="email"
@@ -73,7 +75,7 @@ export default function RegisterPage() {
           />
 
           <Input
-            label="Password"
+            label={t("password")}
             id="password"
             type="password"
             autoComplete="new-password"
@@ -82,13 +84,13 @@ export default function RegisterPage() {
           />
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>
-            {isSubmitting ? "Creating account..." : "Create Account"}
+            {isSubmitting ? t("submitting") : t("submit")}
           </Button>
 
           <p className="text-center text-sm text-[var(--muted-foreground)]">
-            Already have an account?{" "}
+            {t("haveAccount")}{" "}
             <Link href="/login" className="text-[var(--primary)] hover:underline">
-              Sign In
+              {t("login")}
             </Link>
           </p>
         </form>

@@ -1,0 +1,67 @@
+{
+  "landing": {
+    "signIn": "Sign In",
+    "getStarted": "Get Started",
+    "startFree": "Start Free",
+    "heroTitleLine1": "Enterprise Knowledge",
+    "heroTitleLine2": "Operations Assistant",
+    "heroSubtitle": "AI-first platform combining RAG, multi-agent orchestration, and enterprise-grade security for your organization's knowledge.",
+    "footer": "EKOA — Enterprise Software Architecture Specification v1.0",
+    "features": {
+      "multiAgentTitle": "Multi-Agent AI",
+      "multiAgentDescription": "LangGraph-powered agents coordinate retrieval, analysis, and synthesis.",
+      "ragTitle": "Enterprise RAG",
+      "ragDescription": "Upload documents and get citation-backed answers from your knowledge base.",
+      "securityTitle": "Secure by Design",
+      "securityDescription": "JWT authentication, RBAC, audit logging, and multi-tenant isolation.",
+      "workflowTitle": "Workflow Automation",
+      "workflowDescription": "Automate repetitive tasks with human-in-the-loop approval workflows."
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Sign In",
+      "subtitle": "Enterprise Knowledge Operations Assistant",
+      "email": "Email",
+      "password": "Password",
+      "submit": "Sign In",
+      "submitting": "Signing in...",
+      "noAccount": "Don't have an account?",
+      "register": "Register"
+    },
+    "register": {
+      "title": "Create Account",
+      "subtitle": "Join your organization on EKOA",
+      "fullName": "Full Name",
+      "email": "Email",
+      "password": "Password",
+      "submit": "Create Account",
+      "submitting": "Creating account...",
+      "haveAccount": "Already have an account?",
+      "login": "Sign In"
+    }
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "chat": "AI Chat",
+    "documents": "Knowledge",
+    "workflows": "Workflows",
+    "analytics": "Analytics",
+    "settings": "Settings",
+    "signOut": "Sign Out"
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Account and platform preferences",
+    "team": "Team",
+    "teamDescription": "Invite teammates and manage roles",
+    "admin": "Admin Console",
+    "adminDescription": "Org-wide workspace overview (admin/owner only)",
+    "integrations": "Integrations",
+    "language": "Language"
+  },
+  "language": {
+    "english": "English",
+    "arabic": "العربية"
+  }
+}

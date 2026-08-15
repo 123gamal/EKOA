@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { motion } from "motion/react";
 import {
   Brain,
@@ -10,34 +11,17 @@ import {
 } from "lucide-react";
 import { staggerContainer, staggerItem } from "@/components/ui/motion";
 
-const features = [
-  {
-    icon: Brain,
-    title: "Multi-Agent AI",
-    description:
-      "LangGraph-powered agents coordinate retrieval, analysis, and synthesis.",
-  },
-  {
-    icon: FileSearch,
-    title: "Enterprise RAG",
-    description:
-      "Upload documents and get citation-backed answers from your knowledge base.",
-  },
-  {
-    icon: Shield,
-    title: "Secure by Design",
-    description:
-      "JWT authentication, RBAC, audit logging, and multi-tenant isolation.",
-  },
-  {
-    icon: Zap,
-    title: "Workflow Automation",
-    description:
-      "Automate repetitive tasks with human-in-the-loop approval workflows.",
-  },
-];
+const featureIcons = [Brain, FileSearch, Shield, Zap] as const;
+const featureKeys = ["multiAgent", "rag", "security", "workflow"] as const;
 
 export default function HomePage() {
+  const t = useTranslations("landing");
+  const features = featureKeys.map((key, i) => ({
+    icon: featureIcons[i],
+    title: t(`features.${key}Title`),
+    description: t(`features.${key}Description`),
+  }));
+
   return (
     <div className="min-h-screen">
       <header className="border-b border-[var(--border)]">
@@ -53,13 +37,13 @@ export default function HomePage() {
               href="/login"
               className="rounded-lg px-4 py-2 text-sm font-medium transition-colors hover:bg-[var(--muted)]"
             >
-              Sign In
+              {t("signIn")}
             </Link>
             <Link
               href="/register"
               className="gradient-brand glow-shadow rounded-lg px-4 py-2 text-sm font-medium text-white transition-transform hover:scale-[1.02]"
             >
-              Get Started
+              {t("getStarted")}
             </Link>
           </div>
         </div>
@@ -73,26 +57,25 @@ export default function HomePage() {
           className="mx-auto max-w-6xl px-6 py-20 text-center"
         >
           <h1 className="mb-4 text-4xl font-bold tracking-tight sm:text-5xl">
-            Enterprise Knowledge
+            {t("heroTitleLine1")}
             <br />
-            <span className="text-gradient-brand">Operations Assistant</span>
+            <span className="text-gradient-brand">{t("heroTitleLine2")}</span>
           </h1>
           <p className="mx-auto mb-8 max-w-2xl text-lg text-[var(--muted-foreground)]">
-            AI-first platform combining RAG, multi-agent orchestration, and
-            enterprise-grade security for your organization&apos;s knowledge.
+            {t("heroSubtitle")}
           </p>
           <div className="flex justify-center gap-4">
             <Link
               href="/register"
               className="gradient-brand glow-shadow rounded-lg px-8 py-3 font-medium text-white transition-transform hover:scale-[1.02]"
             >
-              Start Free
+              {t("startFree")}
             </Link>
             <Link
               href="/login"
               className="rounded-lg border border-[var(--border)] px-8 py-3 font-medium transition-colors hover:bg-[var(--muted)]"
             >
-              Sign In
+              {t("signIn")}
             </Link>
           </div>
         </motion.section>
@@ -122,7 +105,7 @@ export default function HomePage() {
       </main>
 
       <footer className="border-t border-[var(--border)] py-6 text-center text-sm text-[var(--muted-foreground)]">
-        EKOA &mdash; Enterprise Software Architecture Specification v1.0
+        {t("footer")}
       </footer>
     </div>
   );

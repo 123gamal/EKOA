@@ -2,14 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Settings, User, Plug, Users, ChevronRight, ShieldCheck } from "lucide-react";
 import { authApi, type UserProfile } from "@/lib/api";
 import { Card, CardContent, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { IntegrationsPanel } from "@/components/integrations/IntegrationsPanel";
+import { LanguageSwitcher } from "@/components/layout/LanguageSwitcher";
 import { useAllWorkspaces } from "@/lib/queries";
 
 export default function SettingsPage() {
+  const t = useTranslations("settings");
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -26,9 +29,9 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
+        <h1 className="text-2xl font-bold">{t("title")}</h1>
         <p className="text-sm text-[var(--muted-foreground)]">
-          Account and platform preferences
+          {t("subtitle")}
         </p>
       </div>
 
@@ -79,9 +82,9 @@ export default function SettingsPage() {
             <div className="flex items-center gap-2">
               <Users className="h-5 w-5" />
               <div>
-                <h2 className="font-semibold">Team</h2>
+                <h2 className="font-semibold">{t("team")}</h2>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  Invite teammates and manage roles
+                  {t("teamDescription")}
                 </p>
               </div>
             </div>
@@ -96,9 +99,9 @@ export default function SettingsPage() {
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-5 w-5" />
               <div>
-                <h2 className="font-semibold">Admin Console</h2>
+                <h2 className="font-semibold">{t("admin")}</h2>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  Org-wide workspace overview (admin/owner only)
+                  {t("adminDescription")}
                 </p>
               </div>
             </div>
@@ -110,8 +113,20 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
+            <Settings className="h-5 w-5" />
+            <h2 className="font-semibold">{t("language")}</h2>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <LanguageSwitcher />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
             <Plug className="h-5 w-5" />
-            <h2 className="font-semibold">Integrations</h2>
+            <h2 className="font-semibold">{t("integrations")}</h2>
           </div>
         </CardHeader>
         <CardContent>

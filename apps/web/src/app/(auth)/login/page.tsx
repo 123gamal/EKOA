@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { authApi } from "@/lib/api";
@@ -13,6 +14,7 @@ import { Input } from "@/components/ui/Input";
 import { Card, CardContent } from "@/components/ui/Card";
 
 function LoginForm() {
+  const t = useTranslations("auth.login");
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") || "/dashboard";
@@ -46,9 +48,9 @@ function LoginForm() {
       <CardContent className="pt-6">
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           <div className="mb-6 text-center">
-            <h1 className="text-gradient-brand text-2xl font-bold">Sign In</h1>
+            <h1 className="text-gradient-brand text-2xl font-bold">{t("title")}</h1>
             <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-              Enterprise Knowledge Operations Assistant
+              {t("subtitle")}
             </p>
           </div>
 
@@ -62,7 +64,7 @@ function LoginForm() {
           )}
 
           <Input
-            label="Email"
+            label={t("email")}
             id="email"
             type="email"
             autoComplete="email"
@@ -71,7 +73,7 @@ function LoginForm() {
           />
 
           <Input
-            label="Password"
+            label={t("password")}
             id="password"
             type="password"
             autoComplete="current-password"
@@ -80,13 +82,13 @@ function LoginForm() {
           />
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>
-            {isSubmitting ? "Signing in..." : "Sign In"}
+            {isSubmitting ? t("submitting") : t("submit")}
           </Button>
 
           <p className="text-center text-sm text-[var(--muted-foreground)]">
-            Don&apos;t have an account?{" "}
+            {t("noAccount")}{" "}
             <Link href="/register" className="text-[var(--primary)] hover:underline">
-              Register
+              {t("register")}
             </Link>
           </p>
         </form>
