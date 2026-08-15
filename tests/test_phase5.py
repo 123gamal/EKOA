@@ -344,6 +344,8 @@ async def test_validate_citations_split():
 async def test_graph_strips_unverified_citations(monkeypatch):
     real = "11111111-1111-1111-1111-111111111111"
     fake = "22222222-2222-2222-2222-222222222222"
+    # Citation verification, not intent routing — see test_graph_all_verified_no_flag.
+    monkeypatch.setattr(graph_mod, "_classify_intent", lambda user_msg: "qa")
     monkeypatch.setattr(
         graph_mod, "_call_llm",
         lambda messages, context=None: (
@@ -378,6 +380,11 @@ async def test_graph_strips_unverified_citations(monkeypatch):
 async def test_graph_all_verified_no_flag(monkeypatch):
     doc_a = "11111111-1111-1111-1111-111111111111"
     doc_b = "22222222-2222-2222-2222-222222222222"
+    # This test targets citation verification, not intent routing — pin the
+    # intent to "qa" so it isn't coupled to how a live classifier happens to
+    # categorize the single ambiguous word "summarize" (same fix already
+    # applied to test_graph_falls_back_to_retrieved_when_no_claims below).
+    monkeypatch.setattr(graph_mod, "_classify_intent", lambda user_msg: "qa")
     monkeypatch.setattr(
         graph_mod, "_call_llm",
         lambda messages, context=None: (

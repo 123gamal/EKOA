@@ -77,6 +77,7 @@ class ChatResponse(BaseModel):
     actions: list[dict] = Field(default_factory=list)
     degraded: bool = False
     citations_unverified: bool = False
+    qa_flags: list[str] = Field(default_factory=list)
     created_at: str
 
 
@@ -190,6 +191,7 @@ def _build_initial_state(
     req: ChatRequest,
     organization_id: uuid.UUID | None,
     messages: list[dict[str, str]],
+    user_id: uuid.UUID | None = None,
 ) -> AgentState:
     return {
         "messages": messages,
@@ -197,6 +199,7 @@ def _build_initial_state(
         "context_chunks": [],
         "workspace_id": req.workspace_id,
         "organization_id": str(organization_id) if organization_id else None,
+        "user_id": str(user_id) if user_id else None,
         "collection_name": workspace_collection_name(req.workspace_id) if req.workspace_id else "ekoa_default",
         "final_answer": None,
         "guardrail_flags": [],
@@ -206,6 +209,7 @@ def _build_initial_state(
         "retrieval_latency_ms": None,
         "intent": None,
         "conversation_summary": None,
+        "qa_flags": [],
     }
 
 
@@ -378,7 +382,7 @@ async def chat_sync(
 
     organization_id = await _resolve_org_id(db, req.workspace_id)
     graph = get_agent_graph()
-    state = _build_initial_state(req, organization_id, messages)
+    state = _build_initial_state(req, organization_id, messages, current_user.id)
 
     await _append_message(db, conversation.id, "user", req.message)
     start = time.perf_counter()
@@ -410,6 +414,7 @@ async def chat_sync(
         actions=[dict(a) for a in result.get("actions", [])],
         degraded=bool(result.get("degraded")),
         citations_unverified=bool(result.get("citations_unverified")),
+        qa_flags=list(result.get("qa_flags") or []),
         created_at=_now(),
     )
 
@@ -435,7 +440,7 @@ async def chat_stream(
 
     organization_id = await _resolve_org_id(db, req.workspace_id)
     graph = get_agent_graph()
-    state = _build_initial_state(req, organization_id, messages)
+    state = _build_initial_state(req, organization_id, messages, current_user.id)
     conversation_id = str(conversation.id)
 
     await _append_message(db, conversation.id, "user", req.message)
@@ -450,7 +455,10 @@ async def chat_stream(
 
                 if kind == "on_chain_start":
                     node_name = event.get("name", "")
-                    if node_name in ("coordinator", "retriever", "document", "synthesize"):
+                    if node_name in (
+                        "coordinator", "retriever", "document", "synthesize",
+                        "analytics", "research",
+                    ):
                         yield {
                             "event": "agent_start",
                             "data": json.dumps({"agent": node_name, "timestamp": _now()}),
@@ -495,6 +503,7 @@ async def chat_stream(
                                     "actions": [dict(a) for a in output.get("actions", [])],
                                     "degraded": bool(output.get("degraded")),
                                     "citations_unverified": bool(output.get("citations_unverified")),
+                                    "qa_flags": list(output.get("qa_flags") or []),
                                     "created_at": _now(),
                                 }),
                             }

@@ -21,6 +21,7 @@ import { authApi } from "@/lib/api";
 import { clearTokens, getAccessToken } from "@/lib/auth";
 import { Button } from "@/components/ui/Button";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { NotificationBell } from "@/components/layout/NotificationBell";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -181,7 +182,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </span>
             </div>
           )}
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-1">
+            <NotificationBell />
             <ThemeToggle />
           </div>
         </header>

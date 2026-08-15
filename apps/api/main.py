@@ -17,6 +17,7 @@ from apps.api.routes import (
     invites,
     activity,
     oauth,
+    notifications,
 )
 from apps.api.db.engine import get_engine
 from ekoa_config.settings import get_settings, resolve_cors_origins
@@ -38,6 +39,7 @@ import apps.api.models.connector  # noqa: F401
 import apps.api.models.mcp_api_key  # noqa: F401
 import apps.api.models.org_invite  # noqa: F401
 import apps.api.models.workspace_member  # noqa: F401
+import apps.api.models.notification  # noqa: F401
 
 setup_logging("api")
 
@@ -96,6 +98,7 @@ app.include_router(mcp_keys.router)
 app.include_router(invites.router)
 app.include_router(activity.router)
 app.include_router(oauth.router)
+app.include_router(notifications.router)
 
 
 @app.get("/")

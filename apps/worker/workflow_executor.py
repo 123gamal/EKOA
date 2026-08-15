@@ -17,6 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from ekoa_config.settings import get_settings
+from ekoa_config.logging import get_logger
 from ekoa_utils.naming import workspace_collection_name
 
 from apps.api.models.document import Document
@@ -27,6 +28,7 @@ from apps.worker.parsers import parse_file
 from apps.worker.chunking import chunk_text
 
 settings = get_settings()
+logger = get_logger("worker.workflow_executor")
 
 # --- PII / GDPR detection patterns
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
@@ -313,6 +315,34 @@ EXECUTORS: dict[str, callable] = {
 }
 
 
+def _notify_approval_needed(db: Session, wf: Workflow, run: WorkflowRun) -> None:
+    """Best-effort notification to the workflow's creator that a run is
+    paused awaiting their decision. Never raises — a notification failure
+    must not fail the workflow run itself."""
+    try:
+        from apps.api.models.user import User
+        from apps.api.models.workspace import Workspace
+        from apps.api.services import notification_service
+
+        creator = db.query(User).filter(User.id == wf.created_by).first()
+        workspace = db.query(Workspace).filter(Workspace.id == wf.workspace_id).first()
+        if creator is None:
+            return
+        notification_service.notify_sync(
+            db,
+            user_id=creator.id,
+            organization_id=workspace.organization_id if workspace else None,
+            type="workflow.approval_needed",
+            title=f"Approval needed: {wf.name}",
+            body=f"A run of '{wf.name}' is paused awaiting your approval.",
+            resource_type="workflow_runs",
+            resource_id=run.id,
+            email_to=creator.email,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("workflow_approval_notification_failed", extra={"workflow_id": str(wf.id)})
+
+
 def _run_workflow_core(db: Session, run_id: str) -> None:
     """Execute (or resume) one workflow run against real infrastructure.
 
@@ -365,6 +395,7 @@ def _run_workflow_core(db: Session, run_id: str) -> None:
         run.approved_at = None
         run.approval_reason = None
         wf.status = "AWAITING_APPROVAL"
+        _notify_approval_needed(db, wf, run)
     else:
         run.status = "COMPLETED"
         run.completed_at = datetime.now(timezone.utc)

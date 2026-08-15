@@ -49,6 +49,9 @@ class AgentState(TypedDict):
     # Phase 15
     intent: str | None
     conversation_summary: str | None
+    # Phase 16
+    qa_flags: list[str]
+    user_id: str | None
 
 
 # ── Agent Node Implementations ───────────────────────────────────────────────
@@ -191,7 +194,7 @@ def coordinator_node(state: AgentState) -> dict:
     }
 
 
-_INTENT_VALUES = ("qa", "workflow", "chitchat")
+_INTENT_VALUES = ("qa", "workflow", "chitchat", "analytics", "research", "notifications")
 
 
 def _classify_intent(user_msg: str) -> str:
@@ -212,8 +215,18 @@ def _classify_intent(user_msg: str) -> str:
         "need (e.g. \"hi\", \"thanks\", \"how are you\")\n"
         "- workflow: the user is asking about the status of, or wants to "
         "run, an automation/workflow\n"
-        "- qa: anything else, including any factual question, request for "
-        "information, or document-related query\n\n"
+        "- analytics: the user is asking about usage stats, AI cost/token "
+        "spend, document counts, or other operational metrics for their "
+        "workspace (e.g. \"how many documents were uploaded this week\", "
+        "\"what's our AI cost this month\")\n"
+        "- research: the user's question is complex/multi-part and likely "
+        "needs more than one search pass over the knowledge base to answer "
+        "fully (e.g. comparing multiple documents, or a question with "
+        "several distinct sub-questions)\n"
+        "- notifications: the user is asking whether they have any "
+        "notifications/alerts, or wants their notifications listed\n"
+        "- qa: anything else, including any single, straightforward factual "
+        "question, request for information, or document-related query\n\n"
         f"Message: {user_msg[:500]}\n\nCategory:"
     )
 
@@ -404,6 +417,256 @@ async def workflow_node(state: AgentState) -> dict:
 
     return {
         "final_answer": summary,
+        "actions": state["actions"] + [action],
+    }
+
+
+async def _analytics_summary(workspace_id: str) -> str:
+    """Async DB read of a workspace's AI usage + document stats over the
+    last 7 days, composed into a conversational summary.
+
+    Same async-engine pattern as ``_workflow_status_summary`` (deliberately
+    NOT a second/sync DB access path — see that function's docstring for the
+    two failure modes that pattern avoids).
+    """
+    import uuid as _uuid
+    from datetime import timedelta
+    from sqlalchemy import select
+    from apps.api.db.engine import get_session_factory
+    from apps.api.models.ai_call_log import AiCallLog
+    from apps.api.models.document import Document
+
+    try:
+        ws_uuid = _uuid.UUID(workspace_id) if workspace_id else None
+    except ValueError:
+        ws_uuid = None
+    if ws_uuid is None:
+        return "I don't have a workspace to check usage for."
+
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+    async with get_session_factory()() as db:
+        doc_stmt = select(Document).where(
+            Document.workspace_id == ws_uuid, Document.deleted_at.is_(None)
+        )
+        docs = list((await db.execute(doc_stmt)).scalars().all())
+
+        call_stmt = select(AiCallLog).where(
+            AiCallLog.workspace_id == ws_uuid, AiCallLog.created_at >= since
+        )
+        calls = list((await db.execute(call_stmt)).scalars().all())
+
+    by_status: dict[str, int] = {}
+    for d in docs:
+        by_status[d.status] = by_status.get(d.status, 0) + 1
+    status_line = ", ".join(f"{count} {name}" for name, count in by_status.items()) or "none"
+
+    latencies = [c.latency_ms for c in calls if c.latency_ms is not None]
+    avg_latency = round(sum(latencies) / len(latencies)) if latencies else None
+    total_tokens = sum(c.total_tokens or 0 for c in calls)
+    est_cost = sum(float(c.cost_estimate) for c in calls if c.cost_estimate is not None)
+
+    lines = [
+        f"- **Documents**: {len(docs)} total ({status_line})",
+        f"- **AI calls (last 7 days)**: {len(calls)}",
+    ]
+    if avg_latency is not None:
+        lines.append(f"- **Average latency**: {avg_latency}ms")
+    lines.append(f"- **Total tokens (last 7 days)**: {total_tokens}")
+    lines.append(f"- **Estimated cost (last 7 days)**: ${est_cost:.4f} (estimate, not a billed figure)")
+
+    return "Here's the usage summary for this workspace:\n\n" + "\n".join(lines)
+
+
+async def analytics_node(state: AgentState) -> dict:
+    """Read-only usage/cost summary bridge — answers "how many documents",
+    "what's our AI cost" style questions conversationally. Reuses the same
+    tenant-scoped data ``apps/api/routes/analytics.py`` already exposes over
+    HTTP, queried directly here so chat doesn't need a self-HTTP round-trip.
+    """
+    workspace_id = state.get("workspace_id", "")
+    try:
+        summary = await _analytics_summary(workspace_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("analytics_node_failed", extra={"error": f"{type(exc).__name__}: {exc}"})
+        summary = "I couldn't look up usage analytics right now."
+
+    action: AgentAction = {
+        "tool_name": "analytics.summary",
+        "tool_input": {"workspace_id": workspace_id},
+        "tool_output": "Reported usage analytics (read-only)",
+        "timestamp": _now(),
+    }
+
+    return {
+        "final_answer": summary,
+        "actions": state["actions"] + [action],
+    }
+
+
+async def _notifications_summary(user_id: str) -> str:
+    """Async DB read of a user's most recent notifications, composed into a
+    conversational summary. Same async-engine pattern as
+    ``_workflow_status_summary``/``_analytics_summary``."""
+    import uuid as _uuid
+    from sqlalchemy import select
+    from apps.api.db.engine import get_session_factory
+    from apps.api.models.notification import Notification
+
+    try:
+        user_uuid = _uuid.UUID(user_id) if user_id else None
+    except ValueError:
+        user_uuid = None
+    if user_uuid is None:
+        return "I don't know which user to check notifications for."
+
+    async with get_session_factory()() as db:
+        stmt = (
+            select(Notification)
+            .where(Notification.user_id == user_uuid)
+            .order_by(Notification.created_at.desc())
+            .limit(10)
+        )
+        notifications = (await db.execute(stmt)).scalars().all()
+
+    unread = [n for n in notifications if n.read_at is None]
+    if not notifications:
+        return "You have no notifications."
+
+    lines = [f"You have {len(unread)} unread notification(s):" if unread else "You have no unread notifications. Recent notifications:"]
+    for n in (unread or notifications)[:10]:
+        lines.append(f"- **{n.title}**: {n.body or ''}".rstrip())
+    return "\n".join(lines)
+
+
+async def notification_node(state: AgentState) -> dict:
+    """Read-only bridge answering "do I have any notifications?" style
+    questions — same shape as ``workflow_node``/``analytics_node``."""
+    user_id = state.get("user_id") or ""
+    try:
+        summary = await _notifications_summary(user_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("notification_node_failed", extra={"error": f"{type(exc).__name__}: {exc}"})
+        summary = "I couldn't look up notifications right now."
+
+    action: AgentAction = {
+        "tool_name": "notifications.summary",
+        "tool_input": {"user_id": user_id},
+        "tool_output": "Reported notifications (read-only)",
+        "timestamp": _now(),
+    }
+
+    return {
+        "final_answer": summary,
+        "actions": state["actions"] + [action],
+    }
+
+
+# Hard cap on retrieval passes: an LLM deciding "one more search would help"
+# on every pass could loop indefinitely without a bound. This is exactly the
+# unbounded-agent-loop risk Phase 12's latency work flagged — capped
+# explicitly rather than left to the model's judgment.
+MAX_RESEARCH_PASSES = 3
+
+
+def _should_refine_query(user_msg: str, chunks: list[dict]) -> str | None:
+    """Ask a cheap LLM call whether a narrower follow-up query would help,
+    given what the first retrieval pass found. Returns the follow-up query
+    string, or None to stop refining (including on any failure — a failed
+    refinement check should not block the answer)."""
+    if not chunks:
+        return None
+    preview = "\n".join(f"- {c.get('text', '')[:200]}" for c in chunks[:5])
+    prompt = (
+        "A user asked a multi-part or complex question. Here is a preview of "
+        "what the first knowledge-base search pass found:\n\n"
+        f"{preview}\n\n"
+        f"Original question: {user_msg[:500]}\n\n"
+        "Would a second, more targeted search query uncover additional "
+        "relevant information not already covered above? If yes, reply with "
+        "ONLY the follow-up search query text (no explanation). If no, reply "
+        "with exactly: NONE"
+    )
+    deepseek_key = settings.DEEPSEEK_API_KEY or settings.LLM_API_KEY
+    if not (deepseek_key and not deepseek_key.startswith("sk-your")):
+        return None
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=deepseek_key, base_url=settings.DEEPSEEK_BASE_URL)
+        resp = client.chat.completions.create(
+            model=settings.DEEPSEEK_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=60,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        if not raw or raw.upper().startswith("NONE"):
+            return None
+        return raw
+    except Exception as exc:
+        llm_logger.warning(
+            "research_refine_failed", extra={"error": f"{type(exc).__name__}: {exc}"}
+        )
+        return None
+
+
+async def research_node(state: AgentState) -> dict:
+    """Iterative retrieval for complex/multi-part questions: up to
+    ``MAX_RESEARCH_PASSES`` retrieval passes, each pass's chunks merged
+    (deduped by document_id + chunk_index) before handing off to
+    ``document_node``/``synthesize_node`` — the same downstream path the
+    "qa" intent uses, just with richer context_chunks.
+    """
+    user_msg = state["messages"][-1]["content"] if state["messages"] else ""
+    collection_name = state.get("collection_name", "ekoa_default")
+    organization_id = state.get("organization_id")
+    workspace_id = state.get("workspace_id")
+
+    seen: set[tuple] = set()
+    merged: list[dict] = []
+    queries = [user_msg]
+    passes_run = 0
+
+    def _add(chunks: list[dict]) -> None:
+        for c in chunks:
+            key = (c.get("document_id"), c.get("chunk_index"))
+            if key not in seen:
+                seen.add(key)
+                merged.append(c)
+
+    start = time.perf_counter()
+    query = queries[0]
+    for _ in range(MAX_RESEARCH_PASSES):
+        try:
+            chunks = await asyncio.to_thread(
+                retrieve_chunks,
+                query=query,
+                collection_name=collection_name,
+                organization_id=organization_id,
+                workspace_id=workspace_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("research_node_retrieval_failed", extra={"error": f"{type(exc).__name__}: {exc}"})
+            chunks = []
+        _add(chunks)
+        passes_run += 1
+        if passes_run >= MAX_RESEARCH_PASSES:
+            break
+        follow_up = await asyncio.to_thread(_should_refine_query, user_msg, chunks)
+        if not follow_up:
+            break
+        query = follow_up
+    retrieval_latency_ms = round((time.perf_counter() - start) * 1000)
+
+    action: AgentAction = {
+        "tool_name": "research.iterative_retrieve",
+        "tool_input": {"query": user_msg, "passes": passes_run},
+        "tool_output": f"Ran {passes_run} retrieval pass(es), merged {len(merged)} unique chunks",
+        "timestamp": _now(),
+    }
+
+    return {
+        "context_chunks": merged,
+        "retrieval_latency_ms": retrieval_latency_ms,
         "actions": state["actions"] + [action],
     }
 
@@ -666,6 +929,46 @@ def validate_citations(citations: list[str], context_chunks: list[dict]) -> tupl
     return verified, dropped
 
 
+def _qa_self_check(answer: str, context: str | None) -> list[str]:
+    """Cheap second LLM call: given the answer + retrieved context, flag any
+    claim in the answer not supported by the context. Flag-and-continue, same
+    philosophy as ``check_input_guardrails`` — this never blocks the answer,
+    it only surfaces flags for the caller to display (same treatment as
+    ``citations_unverified``). Returns [] on no context (nothing to check
+    against), no flags found, or any failure (a broken self-check must not
+    break the primary answer).
+    """
+    if not context or not answer:
+        return []
+    prompt = (
+        "You are a fact-checking pass. Given the CONTEXT and the ANSWER below, "
+        "list any specific factual claim in the ANSWER that is NOT supported "
+        "by the CONTEXT. Reply with each unsupported claim on its own line, "
+        "prefixed with '- '. If every claim in the ANSWER is supported by the "
+        "CONTEXT, reply with exactly: NONE\n\n"
+        f"CONTEXT:\n{context[:6000]}\n\nANSWER:\n{answer[:2000]}"
+    )
+    deepseek_key = settings.DEEPSEEK_API_KEY or settings.LLM_API_KEY
+    if not (deepseek_key and not deepseek_key.startswith("sk-your")):
+        return []
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=deepseek_key, base_url=settings.DEEPSEEK_BASE_URL)
+        resp = client.chat.completions.create(
+            model=settings.DEEPSEEK_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=300,
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        if not raw or raw.upper().startswith("NONE"):
+            return []
+        return [line.lstrip("- ").strip() for line in raw.splitlines() if line.strip()]
+    except Exception as exc:
+        llm_logger.warning("qa_self_check_failed", extra={"error": f"{type(exc).__name__}: {exc}"})
+        return []
+
+
 def _messages_for_llm(state: AgentState) -> list[dict[str, str]]:
     """Apply memory compaction (if ``memory_node`` produced a summary) before
     handing messages to the LLM: older turns collapse into one summary line,
@@ -754,6 +1057,22 @@ async def synthesize_node(state: AgentState) -> dict:
         "timestamp": _now(),
     }
 
+    # QA self-check (Phase 16 Part B-4): a second, cheap LLM call flags any
+    # claim in the answer not supported by the retrieved context. Skipped
+    # entirely when the answer came from the degraded fallback (no real LLM
+    # answered, so there's nothing meaningful to fact-check).
+    qa_flags: list[str] = []
+    if not degraded:
+        qa_flags = await asyncio.to_thread(_qa_self_check, answer, context)
+    qa_action: AgentAction = {
+        "tool_name": "qa.self_check",
+        "tool_input": {"chunks_available": len(chunks)},
+        "tool_output": (
+            f"{len(qa_flags)} unsupported claim(s) flagged" if qa_flags else "No unsupported claims flagged"
+        ),
+        "timestamp": _now(),
+    }
+
     return {
         "final_answer": answer,
         "degraded": degraded,
@@ -761,25 +1080,36 @@ async def synthesize_node(state: AgentState) -> dict:
         "citations_unverified": citations_unverified,
         "llm_telemetry": telemetry,
         "guardrail_flags": guardrail_flags,
-        "actions": state["actions"] + [action],
+        "qa_flags": qa_flags,
+        "actions": state["actions"] + [action, qa_action],
     }
 
 
-def intent_router_condition(state: AgentState) -> Literal["memory", "workflow", "synthesize"]:
-    """Route based on the planner's real intent classification (Phase 15).
+def intent_router_condition(
+    state: AgentState,
+) -> Literal["memory", "workflow", "analytics", "research", "notifications", "synthesize"]:
+    """Route based on the planner's real intent classification (Phase 15,
+    extended Phase 16 with analytics/research/notifications).
 
-    Prior to Phase 15 this was a linear sequencer inferring position from
-    which actions had already run, with no actual intent logic — see
-    ``planner_node``/``_classify_intent`` for what now drives this. "qa"
-    (the default) takes the full retrieve-and-synthesize path via
+    "qa" (the default) takes the full retrieve-and-synthesize path via
     ``memory`` first; "chitchat" skips straight to synthesis (no retrieval
-    needed for a greeting); "workflow" goes to the read-only workflow bridge.
+    needed for a greeting); "workflow" goes to the read-only workflow
+    bridge; "analytics" goes to the read-only usage-summary bridge;
+    "research" goes to the iterative multi-pass retriever instead of the
+    single-pass one; "notifications" goes to the read-only notifications
+    bridge.
     """
     intent = state.get("intent") or "qa"
     if intent == "chitchat":
         return "synthesize"
     if intent == "workflow":
         return "workflow"
+    if intent == "analytics":
+        return "analytics"
+    if intent == "research":
+        return "research"
+    if intent == "notifications":
+        return "notifications"
     return "memory"
 
 
@@ -797,6 +1127,9 @@ def build_agent_graph() -> StateGraph:
     workflow.add_node("retriever", retriever_node)
     workflow.add_node("document", document_node)
     workflow.add_node("workflow", workflow_node)
+    workflow.add_node("analytics", analytics_node)
+    workflow.add_node("research", research_node)
+    workflow.add_node("notifications", notification_node)
     workflow.add_node("synthesize", synthesize_node)
 
     workflow.set_entry_point("security")
@@ -809,13 +1142,19 @@ def build_agent_graph() -> StateGraph:
         {
             "memory": "memory",
             "workflow": "workflow",
+            "analytics": "analytics",
+            "research": "research",
+            "notifications": "notifications",
             "synthesize": "synthesize",
         },
     )
     workflow.add_edge("memory", "retriever")
     workflow.add_edge("retriever", "document")
+    workflow.add_edge("research", "document")
     workflow.add_edge("document", "synthesize")
     workflow.add_edge("workflow", END)
+    workflow.add_edge("analytics", END)
+    workflow.add_edge("notifications", END)
     workflow.add_edge("synthesize", END)
 
     return workflow.compile()

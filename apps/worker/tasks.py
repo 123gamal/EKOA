@@ -172,6 +172,31 @@ def _ensure_fresh_credential(db: Session, connector, credential) -> str:
     return refreshed.access_token
 
 
+def _notify_connector_sync_failed(db: Session, connector, error: str) -> None:
+    """Best-effort notification to whoever connected the integration that
+    its sync permanently failed. Never raises."""
+    try:
+        from apps.api.models.user import User
+        from apps.api.services import notification_service
+
+        user = db.query(User).filter(User.id == connector.connected_by).first()
+        if user is None:
+            return
+        notification_service.notify_sync(
+            db,
+            user_id=user.id,
+            organization_id=connector.organization_id,
+            type="connector.sync_failed",
+            title=f"{connector.provider} connector sync failed",
+            body=f"'{connector.name}' failed to sync: {error}",
+            resource_type="connectors",
+            resource_id=connector.id,
+            email_to=user.email,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("connector_failure_notification_failed", extra={"connector_id": str(connector.id)})
+
+
 @app.task(bind=True, max_retries=3, default_retry_delay=60)
 def sync_connector_task(self, connector_id: str, correlation_id: str | None = None):
     """Sync any connected integration into Qdrant, dispatched by provider.
@@ -257,6 +282,7 @@ def sync_connector_task(self, connector_id: str, correlation_id: str | None = No
                 connector.last_sync_error = str(exc)
                 connector.last_sync_at = datetime.now(timezone.utc)
                 db.commit()
+                _notify_connector_sync_failed(db, connector, str(exc))
         task_logger.error(
             "connector_sync_permanent_failure",
             extra={"connector_id": connector_id, "error": str(exc)},

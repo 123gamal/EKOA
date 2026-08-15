@@ -15,6 +15,7 @@ from apps.api.models.mcp_api_key import McpApiKey
 from apps.api.models.ai_call_log import AiCallLog
 from apps.api.models.org_invite import OrgInvite
 from apps.api.models.workspace_member import WorkspaceMember
+from apps.api.models.notification import Notification
 
 __all__ = [
     "User",
@@ -35,4 +36,5 @@ __all__ = [
     "AiCallLog",
     "OrgInvite",
     "WorkspaceMember",
+    "Notification",
 ]

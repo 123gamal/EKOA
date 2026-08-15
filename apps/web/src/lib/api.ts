@@ -232,6 +232,17 @@ export interface ActivityEntry {
   created_at: string;
 }
 
+export interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  body?: string | null;
+  resource_type?: string | null;
+  resource_id?: string | null;
+  read_at?: string | null;
+  created_at: string;
+}
+
 export interface ConnectorHealth {
   id: string;
   provider: string;
@@ -440,6 +451,27 @@ export const activityApi = {
   async list(orgId: string, page = 1, pageSize = 25): Promise<Paginated<ActivityEntry>> {
     const res = await apiFetch(`/organizations/${orgId}/activity?page=${page}&page_size=${pageSize}`);
     if (!res.ok) throw new Error(await extractErrorDetail(res, "Failed to load activity"));
+    return res.json();
+  },
+};
+
+export const notificationApi = {
+  async list(unreadOnly = false, page = 1, pageSize = 10): Promise<Paginated<Notification>> {
+    const res = await apiFetch(
+      `/notifications/?unread_only=${unreadOnly}&page=${page}&page_size=${pageSize}`
+    );
+    if (!res.ok) throw new Error("Failed to load notifications");
+    return res.json();
+  },
+  async unreadCount(): Promise<number> {
+    const res = await apiFetch("/notifications/unread-count");
+    if (!res.ok) throw new Error("Failed to load unread notification count");
+    const data = await res.json();
+    return data.unread_count;
+  },
+  async markRead(id: string): Promise<Notification> {
+    const res = await apiFetch(`/notifications/${id}/read`, { method: "POST" });
+    if (!res.ok) throw new Error("Failed to mark notification read");
     return res.json();
   },
 };
