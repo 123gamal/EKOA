@@ -133,9 +133,12 @@ class Settings(BaseSettings):
 
     # ── Microsoft Graph (Phase 16) — Outlook + OneDrive + MS Teams ────────
     # One Azure AD app registration covers all three (different Graph scopes
-    # per connector, same client credentials).
+    # per connector, same client credentials). Single-tenant app registration
+    # ("My organization only") — TENANT_ID is required in the auth/token URLs
+    # instead of "common".
     MICROSOFT_CLIENT_ID: str = ""
     MICROSOFT_CLIENT_SECRET: str = ""
+    MICROSOFT_TENANT_ID: str = "common"
     MICROSOFT_OAUTH_REDIRECT_URI: str = (
         "http://localhost/api/v1/connectors/oauth/microsoft/callback"
     )

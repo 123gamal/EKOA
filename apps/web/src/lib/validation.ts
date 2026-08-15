@@ -56,6 +56,15 @@ export const connectNotionSchema = z.object({
   accessToken: z.string().min(1, "Integration token is required").max(512),
 });
 
+export const connectConfluenceSchema = z.object({
+  workspaceId: z.string().min(1, "Select a workspace"),
+  name: z.string().trim().min(1, "Integration name is required").max(255),
+  baseUrl: z.string().trim().min(1, "Base URL is required").max(255),
+  spaceKey: z.string().trim().min(1, "Space key is required").max(50),
+  email: z.string().trim().min(1, "Email is required").email("Enter a valid email address"),
+  apiToken: z.string().min(1, "API token is required").max(512),
+});
+
 export type LoginValues = z.infer<typeof loginSchema>;
 export type RegisterValues = z.infer<typeof registerSchema>;
 export type CreateWorkflowValues = z.infer<typeof createWorkflowSchema>;
@@ -63,3 +72,4 @@ export type ApprovalDecisionValues = z.infer<typeof approvalDecisionSchema>;
 export type ConnectConnectorValues = z.infer<typeof connectConnectorSchema>;
 export type ConnectJiraValues = z.infer<typeof connectJiraSchema>;
 export type ConnectNotionValues = z.infer<typeof connectNotionSchema>;
+export type ConnectConfluenceValues = z.infer<typeof connectConfluenceSchema>;

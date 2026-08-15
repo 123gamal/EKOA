@@ -146,4 +146,13 @@ def get_connector_adapter(provider: str) -> ConnectorAdapter:
     if provider == "confluence":
         from apps.api.services.connectors.confluence import ConfluenceConnector
         return ConfluenceConnector()
+    if provider == "outlook":
+        from apps.api.services.connectors.outlook import OutlookConnector
+        return OutlookConnector()
+    if provider == "onedrive":
+        from apps.api.services.connectors.onedrive import OneDriveConnector
+        return OneDriveConnector()
+    if provider == "ms_teams":
+        from apps.api.services.connectors.ms_teams import MsTeamsConnector
+        return MsTeamsConnector()
     raise ConnectorValidationError(f"Unsupported connector provider: {provider!r}")

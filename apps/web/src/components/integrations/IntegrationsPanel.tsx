@@ -18,6 +18,12 @@ import {
   Database,
   Clock,
   ExternalLink,
+  BookOpen,
+  Calendar,
+  Table,
+  Mail,
+  Cloud,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -28,20 +34,49 @@ import {
   connectConnectorSchema,
   connectJiraSchema,
   connectNotionSchema,
+  connectConfluenceSchema,
   type ConnectConnectorValues,
   type ConnectJiraValues,
   type ConnectNotionValues,
+  type ConnectConfluenceValues,
 } from "@/lib/validation";
 
-type Provider = "github" | "jira" | "notion" | "slack" | "google_drive";
+type Provider =
+  | "github"
+  | "jira"
+  | "notion"
+  | "confluence"
+  | "slack"
+  | "google_drive"
+  | "google_calendar"
+  | "google_sheets"
+  | "outlook"
+  | "onedrive"
+  | "ms_teams";
 
 const PROVIDER_META: Record<Provider, { label: string; icon: typeof Github; authType: "pat" | "oauth2" }> = {
   github: { label: "GitHub", icon: Github, authType: "pat" },
   jira: { label: "Jira", icon: Kanban, authType: "pat" },
   notion: { label: "Notion", icon: FileText, authType: "pat" },
+  confluence: { label: "Confluence", icon: BookOpen, authType: "pat" },
   slack: { label: "Slack", icon: MessageSquare, authType: "oauth2" },
   google_drive: { label: "Google Drive", icon: HardDrive, authType: "oauth2" },
+  google_calendar: { label: "Google Calendar", icon: Calendar, authType: "oauth2" },
+  google_sheets: { label: "Google Sheets", icon: Table, authType: "oauth2" },
+  outlook: { label: "Outlook", icon: Mail, authType: "oauth2" },
+  onedrive: { label: "OneDrive", icon: Cloud, authType: "oauth2" },
+  ms_teams: { label: "MS Teams", icon: Users, authType: "oauth2" },
 };
+
+const OAUTH_PROVIDERS: Provider[] = [
+  "slack",
+  "google_drive",
+  "google_calendar",
+  "google_sheets",
+  "outlook",
+  "onedrive",
+  "ms_teams",
+];
 
 const STATUS_VARIANT: Record<string, "success" | "error" | "warning" | "info" | "default"> = {
   connected: "success",
@@ -59,6 +94,7 @@ function connectorSubtitle(connector: Connector): string {
   const c = connector.config as Record<string, unknown> | null;
   if (c?.owner && c?.repo) return `${c.owner}/${c.repo}`;
   if (c?.project_key) return `Project ${c.project_key}`;
+  if (c?.space_key) return `Space ${c.space_key}`;
   if (c?.title) return String(c.title);
   if (c?.team_name) return `Slack workspace: ${c.team_name}`;
   if (c?.account) return String(c.account);
@@ -215,7 +251,21 @@ export function IntegrationsPanel({ workspaces }: { workspaces: { id: string; na
             }
           />
         )}
-        {(activeProvider === "slack" || activeProvider === "google_drive") && (
+        {activeProvider === "confluence" && (
+          <ConfluenceForm
+            workspaceId={selectedWs}
+            isPending={connectMutation.isPending}
+            onSubmit={(v) =>
+              connectMutation.mutate({
+                provider: "confluence",
+                name: v.name,
+                accessToken: `${v.email}:${v.apiToken}`,
+                config: { base_url: v.baseUrl, space_key: v.spaceKey },
+              })
+            }
+          />
+        )}
+        {OAUTH_PROVIDERS.includes(activeProvider) && (
           <div className="space-y-3 rounded-lg border border-[var(--border)] p-4">
             <p className="text-sm text-[var(--muted-foreground)]">
               {PROVIDER_META[activeProvider].label} uses OAuth — you&apos;ll be redirected to sign
@@ -426,6 +476,40 @@ function JiraForm({
       <Button type="submit" disabled={isPending || !workspaceId}>
         {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
         Connect Jira Project
+      </Button>
+    </form>
+  );
+}
+
+function ConfluenceForm({
+  workspaceId,
+  isPending,
+  onSubmit,
+}: {
+  workspaceId: string;
+  isPending: boolean;
+  onSubmit: (v: ConnectConfluenceValues) => void;
+}) {
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<ConnectConfluenceValues>({
+    resolver: zodResolver(connectConfluenceSchema),
+    defaultValues: { workspaceId, name: "", baseUrl: "", spaceKey: "", email: "", apiToken: "" },
+  });
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+      <Input label="Integration Name" placeholder="e.g. Team Wiki" error={errors.name?.message} {...register("name")} />
+      <Input label="Base URL" placeholder="https://yourcompany.atlassian.net" error={errors.baseUrl?.message} {...register("baseUrl")} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Input label="Space Key" placeholder="e.g. ENG" error={errors.spaceKey?.message} {...register("spaceKey")} />
+        <Input label="Email" type="email" placeholder="you@company.com" error={errors.email?.message} {...register("email")} />
+      </div>
+      <Input label="API Token" type="password" error={errors.apiToken?.message} {...register("apiToken")} />
+      <Button type="submit" disabled={isPending || !workspaceId}>
+        {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+        Connect Confluence Space
       </Button>
     </form>
   );
