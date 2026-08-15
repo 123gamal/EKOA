@@ -154,6 +154,114 @@ def _decode_cursor(cursor: str | None) -> int:
         raise ToolError("Invalid cursor") from exc
 
 
+async def get_workflow_status() -> dict:
+    """Report the authenticated workspace's workflows and their latest run.
+
+    Same read as the chat graph's ``workflow_node`` (structured, not prose):
+    reads ``Workflow``/``WorkflowRun`` via the shared async engine.
+    """
+    from apps.api.models.workflow import Workflow, WorkflowRun
+
+    identity = current_identity()
+
+    async with get_mcp_session_factory()() as db:
+        stmt = (
+            select(Workflow)
+            .where(Workflow.workspace_id == identity.workspace_id, Workflow.deleted_at.is_(None))
+            .order_by(Workflow.created_at.desc())
+            .limit(20)
+        )
+        workflows = list((await db.execute(stmt)).scalars().all())
+
+        items = []
+        for wf in workflows:
+            run_stmt = (
+                select(WorkflowRun)
+                .where(WorkflowRun.workflow_id == wf.id)
+                .order_by(WorkflowRun.created_at.desc())
+                .limit(1)
+            )
+            latest_run = (await db.execute(run_stmt)).scalars().first()
+            items.append(
+                {
+                    "id": str(wf.id),
+                    "name": wf.name,
+                    "status": wf.status,
+                    "latest_run": (
+                        None
+                        if latest_run is None
+                        else {
+                            "id": str(latest_run.id),
+                            "status": latest_run.status,
+                            "approval_status": latest_run.approval_status,
+                            "started_at": latest_run.started_at.isoformat() if latest_run.started_at else None,
+                            "completed_at": latest_run.completed_at.isoformat() if latest_run.completed_at else None,
+                        }
+                    ),
+                }
+            )
+
+    await _record_usage(
+        identity, tool="get_workflow_status", detail={"workflow_count": len(items)}
+    )
+    return {"workspace_id": str(identity.workspace_id), "workflows": items}
+
+
+async def query_analytics(days: int = 7) -> dict:
+    """Summarize the authenticated workspace's AI usage and document stats.
+
+    Mirrors ``apps/api/routes/analytics.py``'s ``model_performance`` summary
+    fields, scoped to one workspace via the MCP key's identity, over the
+    async engine — no HTTP round-trip through the API service.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from apps.api.models.ai_call_log import AiCallLog
+    from apps.api.models.document import Document
+
+    identity = current_identity()
+    bounded_days = max(1, min(int(days), 90))
+    since = datetime.now(timezone.utc) - timedelta(days=bounded_days)
+
+    async with get_mcp_session_factory()() as db:
+        doc_stmt = select(Document).where(
+            Document.workspace_id == identity.workspace_id,
+            Document.deleted_at.is_(None),
+        )
+        docs = list((await db.execute(doc_stmt)).scalars().all())
+
+        call_stmt = select(AiCallLog).where(
+            AiCallLog.workspace_id == identity.workspace_id,
+            AiCallLog.created_at >= since,
+        )
+        calls = list((await db.execute(call_stmt)).scalars().all())
+
+    by_status: dict[str, int] = {}
+    for d in docs:
+        by_status[d.status] = by_status.get(d.status, 0) + 1
+
+    latencies = [c.latency_ms for c in calls if c.latency_ms is not None]
+    avg_latency = round(sum(latencies) / len(latencies), 2) if latencies else None
+    total_tokens = sum(c.total_tokens or 0 for c in calls)
+    est_cost = sum(float(c.cost_estimate) for c in calls if c.cost_estimate is not None)
+
+    result = {
+        "workspace_id": str(identity.workspace_id),
+        "window_days": bounded_days,
+        "documents": len(docs),
+        "documents_by_status": by_status,
+        "ai_calls": len(calls),
+        "avg_latency_ms": avg_latency,
+        "total_tokens": total_tokens,
+        "est_cost_usd": round(est_cost, 6),
+        "cost_is_estimate": True,
+    }
+    await _record_usage(
+        identity, tool="query_analytics", detail={"window_days": bounded_days, "ai_calls": len(calls)}
+    )
+    return result
+
+
 async def list_documents(cursor: str | None = None, limit: int = 20) -> dict:
     """List indexed documents in the key's workspace (cursor pagination).
 

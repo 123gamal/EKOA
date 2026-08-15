@@ -120,6 +120,25 @@ class Settings(BaseSettings):
     GOOGLE_DRIVE_OAUTH_REDIRECT_URI: str = (
         "http://localhost/api/v1/connectors/oauth/google_drive/callback"
     )
+    # Calendar/Sheets reuse the Drive app's client ID/secret (same Google
+    # Cloud project) — just their own scope + redirect URI per connector, so
+    # each OAuth grant stays minimal (a Calendar token can never read Drive
+    # files, etc.) even though one app covers all three.
+    GOOGLE_CALENDAR_OAUTH_REDIRECT_URI: str = (
+        "http://localhost/api/v1/connectors/oauth/google_calendar/callback"
+    )
+    GOOGLE_SHEETS_OAUTH_REDIRECT_URI: str = (
+        "http://localhost/api/v1/connectors/oauth/google_sheets/callback"
+    )
+
+    # ── Microsoft Graph (Phase 16) — Outlook + OneDrive + MS Teams ────────
+    # One Azure AD app registration covers all three (different Graph scopes
+    # per connector, same client credentials).
+    MICROSOFT_CLIENT_ID: str = ""
+    MICROSOFT_CLIENT_SECRET: str = ""
+    MICROSOFT_OAUTH_REDIRECT_URI: str = (
+        "http://localhost/api/v1/connectors/oauth/microsoft/callback"
+    )
 
     # ── MCP server (Phase 8) ─────────────────────────────────────────────
     # The MCP server exposes two tenant-scoped tools (search_knowledge_base,

@@ -409,3 +409,138 @@ async def test_tool_call_fake_end_to_end_no_retriever_dependency(client, db_sess
         from mcp.server.auth.middleware.auth_context import auth_context_var
         auth_context_var.reset(ctx)
     assert result["results"][0]["text"] == "hello"
+
+
+# ── MCP tools (Phase 16 Part C): get_workflow_status, query_analytics ─────────
+
+
+@pytest.mark.asyncio
+async def test_get_workflow_status_tool_reports_latest_run(client, db_session):
+    """get_workflow_status returns each workflow with its most recent run,
+    including approval-pending state, scoped to the key's workspace."""
+    from apps.api.models.workflow import Workflow, WorkflowRun
+    from apps.mcp_server.tools import get_workflow_status
+
+    headers = await _register_login(client, f"wftool-{uuid.uuid4().hex[:8]}@example.com")
+    seed = await _seed_org_ws(client, headers, db_session)
+    created = await _create_key(client, seed)
+
+    stmt = select(User).join(OrgMember).where(
+        OrgMember.organization_id == uuid.UUID(seed["org"]["id"])
+    )
+    owner = (await db_session.execute(stmt)).scalars().first()
+
+    wf = Workflow(
+        name="Compliance Audit",
+        template_id="compliance_audit",
+        status="RUNNING",
+        workspace_id=uuid.UUID(seed["ws"]["id"]),
+        created_by=owner.id,
+    )
+    db_session.add(wf)
+    await db_session.flush()
+    db_session.add(WorkflowRun(
+        workflow_id=wf.id, status="AWAITING_APPROVAL", approval_status="PENDING",
+    ))
+    await db_session.commit()
+
+    ctx = _authed_context({
+        "key_id": created["id"],
+        "organization_id": seed["org"]["id"],
+        "workspace_id": seed["ws"]["id"],
+    })
+    try:
+        result = await get_workflow_status()
+    finally:
+        from mcp.server.auth.middleware.auth_context import auth_context_var
+        auth_context_var.reset(ctx)
+
+    assert result["workspace_id"] == seed["ws"]["id"]
+    assert len(result["workflows"]) == 1
+    assert result["workflows"][0]["name"] == "Compliance Audit"
+    assert result["workflows"][0]["latest_run"]["approval_status"] == "PENDING"
+
+    audits = (await db_session.execute(
+        select(AuditLog).where(AuditLog.action == "mcp.tool_call")
+    )).scalars().all()
+    assert any(a.details and a.details.get("tool") == "get_workflow_status" for a in audits)
+
+
+@pytest.mark.asyncio
+async def test_get_workflow_status_tool_empty_workspace(client, db_session):
+    from apps.mcp_server.tools import get_workflow_status
+
+    headers = await _register_login(client, f"wfempty-{uuid.uuid4().hex[:8]}@example.com")
+    seed = await _seed_org_ws(client, headers, db_session)
+    created = await _create_key(client, seed)
+
+    ctx = _authed_context({
+        "key_id": created["id"],
+        "organization_id": seed["org"]["id"],
+        "workspace_id": seed["ws"]["id"],
+    })
+    try:
+        result = await get_workflow_status()
+    finally:
+        from mcp.server.auth.middleware.auth_context import auth_context_var
+        auth_context_var.reset(ctx)
+    assert result["workflows"] == []
+
+
+@pytest.mark.asyncio
+async def test_query_analytics_tool_summarizes_usage(client, db_session):
+    """query_analytics aggregates AiCallLog + Document rows scoped to the
+    key's workspace, within the requested lookback window."""
+    from apps.api.models.ai_call_log import AiCallLog
+    from apps.mcp_server.tools import query_analytics
+
+    headers = await _register_login(client, f"antool-{uuid.uuid4().hex[:8]}@example.com")
+    seed = await _seed_org_ws(client, headers, db_session)
+    created = await _create_key(client, seed)
+
+    stmt = select(User).join(OrgMember).where(
+        OrgMember.organization_id == uuid.UUID(seed["org"]["id"])
+    )
+    uploader = (await db_session.execute(stmt)).scalars().first()
+
+    db_session.add(Document(
+        title="Doc 1", content_type="text/plain", status="INDEXED",
+        file_path="docs/1.txt", chunk_count=2,
+        workspace_id=uuid.UUID(seed["ws"]["id"]),
+        uploaded_by=uploader.id,
+    ))
+    db_session.add(AiCallLog(
+        organization_id=uuid.UUID(seed["org"]["id"]),
+        workspace_id=uuid.UUID(seed["ws"]["id"]),
+        provider="deepseek", model="deepseek-chat",
+        latency_ms=250, prompt_tokens=100, completion_tokens=50, total_tokens=150,
+        cost_estimate=0.001234,
+    ))
+    await db_session.commit()
+
+    ctx = _authed_context({
+        "key_id": created["id"],
+        "organization_id": seed["org"]["id"],
+        "workspace_id": seed["ws"]["id"],
+    })
+    try:
+        result = await query_analytics(days=7)
+    finally:
+        from mcp.server.auth.middleware.auth_context import auth_context_var
+        auth_context_var.reset(ctx)
+
+    assert result["workspace_id"] == seed["ws"]["id"]
+    assert result["documents"] == 1
+    assert result["ai_calls"] == 1
+    assert result["avg_latency_ms"] == 250
+    assert result["total_tokens"] == 150
+    assert result["cost_is_estimate"] is True
+
+
+@pytest.mark.asyncio
+async def test_query_analytics_tool_requires_authenticated_key(client, db_session):
+    from apps.mcp_server.tools import query_analytics
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    with pytest.raises(ToolError):
+        await query_analytics()

@@ -137,4 +137,13 @@ def get_connector_adapter(provider: str) -> ConnectorAdapter:
     if provider == "google_drive":
         from apps.api.services.connectors.google_drive import GoogleDriveConnector
         return GoogleDriveConnector()
+    if provider == "google_calendar":
+        from apps.api.services.connectors.google_calendar import GoogleCalendarConnector
+        return GoogleCalendarConnector()
+    if provider == "google_sheets":
+        from apps.api.services.connectors.google_sheets import GoogleSheetsConnector
+        return GoogleSheetsConnector()
+    if provider == "confluence":
+        from apps.api.services.connectors.confluence import ConfluenceConnector
+        return ConfluenceConnector()
     raise ConnectorValidationError(f"Unsupported connector provider: {provider!r}")

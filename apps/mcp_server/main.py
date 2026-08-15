@@ -20,7 +20,12 @@ from mcp.server.mcpserver.server import MCPServer
 
 from apps.mcp_server.auth import EkoaTokenVerifier
 from apps.mcp_server.db import get_mcp_session_factory
-from apps.mcp_server.tools import list_documents, search_knowledge_base
+from apps.mcp_server.tools import (
+    get_workflow_status,
+    list_documents,
+    query_analytics,
+    search_knowledge_base,
+)
 from ekoa_config.logging import get_logger, setup_logging
 from ekoa_config.settings import get_settings
 
@@ -39,6 +44,18 @@ _LIST_DESCRIPTION = (
     "the authenticated workspace. Paginate with the returned next_cursor."
 )
 
+_WORKFLOW_STATUS_DESCRIPTION = (
+    "Report the authenticated workspace's workflows and each one's latest run "
+    "status (including approval-pending state). Read-only; does not trigger "
+    "or modify any workflow run."
+)
+
+_ANALYTICS_DESCRIPTION = (
+    "Summarize the authenticated workspace's AI usage (call count, average "
+    "latency, token totals, estimated cost) and document counts by status "
+    "over a lookback window (default 7 days, max 90)."
+)
+
 
 def create_server() -> MCPServer:
     """Construct and wire the MCP server with tools + auth + health route."""
@@ -47,10 +64,12 @@ def create_server() -> MCPServer:
         title="EKOA Knowledge MCP Server",
         version="0.1.0",
         description=(
-            "Ektra tenancy-scoped knowledge access: search_knowledge_base "
+            "EKOA tenancy-scoped knowledge access: search_knowledge_base "
             "retrieves relevant chunks from the workspace's vector index; "
-            "list_documents enumerates indexed documents. Both require a valid "
-            "MCP API key bound to a workspace."
+            "list_documents enumerates indexed documents; get_workflow_status "
+            "reports workflow run state; query_analytics summarizes AI usage "
+            "and document stats. All require a valid MCP API key bound to a "
+            "workspace."
         ),
         auth=AuthSettings(
             issuer_url=settings.MCP_ISSUER_URL,
@@ -68,6 +87,16 @@ def create_server() -> MCPServer:
     async def documents_tool(cursor: str | None = None, limit: int = 20) -> dict:
         """List indexed documents in the workspace."""
         return await list_documents(cursor, limit)
+
+    @server.tool(name="get_workflow_status", description=_WORKFLOW_STATUS_DESCRIPTION)
+    async def workflow_status_tool() -> dict:
+        """Report workspace workflow status."""
+        return await get_workflow_status()
+
+    @server.tool(name="query_analytics", description=_ANALYTICS_DESCRIPTION)
+    async def analytics_tool(days: int = 7) -> dict:
+        """Summarize workspace AI usage and document stats."""
+        return await query_analytics(days)
 
     @server.custom_route("/health", methods=["GET"])
     async def health(request: Request) -> Response:
@@ -95,7 +124,12 @@ def create_server() -> MCPServer:
                 "service": "ekoa-mcp",
                 "version": "0.1.0",
                 "dependencies": dependencies,
-                "tools": ["search_knowledge_base", "list_documents"],
+                "tools": [
+                    "search_knowledge_base",
+                    "list_documents",
+                    "get_workflow_status",
+                    "query_analytics",
+                ],
             },
             status_code=200 if healthy else 503,
         )
